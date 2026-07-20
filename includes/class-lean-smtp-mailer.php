@@ -382,18 +382,30 @@ class Lean_SMTP_Mailer {
 			return self::fail_ses( $to, $subject, $result->get_error_message() );
 		}
 
-		Lean_SMTP_Logger::log( self::MAILER_SES, $to, $subject, true );
+		// Log through the same wp_mail_succeeded hook the SMTP path uses, so a
+		// send is recorded exactly once. Core doesn't fire this when pre_wp_mail
+		// short-circuits, so we fire it ourselves (also notifies other plugins).
+		do_action(
+			'wp_mail_succeeded',
+			[
+				'to'          => $to,
+				'subject'     => $subject,
+				'message'     => $message,
+				'headers'     => $headers,
+				'attachments' => $attachments,
+			]
+		);
 		return true;
 	}
 
 	/**
-	 * Record an SES failure, fire the standard hook, and report failure to wp_mail().
+	 * Fire the standard wp_mail_failed hook — which the logger and other plugins
+	 * listen on — and report failure to wp_mail(). Logging happens via that hook,
+	 * not here, so a failed send is never recorded twice.
 	 *
 	 * @param string[] $to
 	 */
 	private static function fail_ses( array $to, string $subject, string $error ): bool {
-		Lean_SMTP_Logger::log( self::MAILER_SES, $to, $subject, false, $error );
-
 		$mail_error = new WP_Error();
 		$mail_error->add(
 			'wp_mail_failed',

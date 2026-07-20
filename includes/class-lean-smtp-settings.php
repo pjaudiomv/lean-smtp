@@ -87,6 +87,13 @@ class Lean_SMTP_Settings {
 		if ( '' === $value ) {
 			return (string) get_option( $option, '' );
 		}
+		// WordPress runs the sanitize callback twice on the first save of a new
+		// option (update_option, then add_option). The second pass receives our
+		// own ciphertext — don't encrypt it again, or the stored value decrypts
+		// to a still-encrypted string and every signature/auth fails.
+		if ( Lean_SMTP_Crypto::is_encrypted( $value ) ) {
+			return $value;
+		}
 		return Lean_SMTP_Crypto::encrypt( sanitize_text_field( $value ) );
 	}
 

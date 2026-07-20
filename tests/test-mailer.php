@@ -138,4 +138,95 @@ class Test_Lean_SMTP_Mailer extends WP_UnitTestCase {
 
 		$this->assertFalse( $ok );
 	}
+
+	// -------------------------------------------------------------------------
+	// Regressions
+	// -------------------------------------------------------------------------
+
+	public function test_secret_encryption_is_idempotent() {
+		// WordPress runs a setting's sanitize callback twice on the first save
+		// of a new option (update_option, then add_option). The second pass
+		// receives our own ciphertext and must not re-encrypt it — otherwise the
+		// stored secret decrypts to a still-encrypted string and every SES
+		// signature fails with HTTP 403.
+		$enc1 = Lean_SMTP_Settings::sanitize_ses_secret( 'my-aws-secret/key+value' );
+		$enc2 = Lean_SMTP_Settings::sanitize_ses_secret( $enc1 );
+
+		$this->assertSame( $enc1, $enc2, 'Re-sanitizing ciphertext must return it unchanged.' );
+		$this->assertSame( 'my-aws-secret/key+value', Lean_SMTP_Crypto::decrypt( $enc2 ) );
+	}
+
+	public function test_ses_success_fires_succeeded_hook_exactly_once() {
+		$this->configure_ses();
+		add_filter(
+			'pre_http_request',
+			function () {
+				return [
+					'response' => [
+						'code'    => 200,
+						'message' => 'OK',
+					],
+					'body'     => '{"MessageId":"x"}',
+				];
+			}
+		);
+
+		$calls = 0;
+		add_action(
+			'wp_mail_succeeded',
+			function () use ( &$calls ) {
+				$calls++;
+			}
+		);
+
+		Lean_SMTP_Mailer::send_via_ses(
+			null,
+			[
+				'to'          => 'rcpt@example.com',
+				'subject'     => 'Hello',
+				'message'     => 'Body',
+				'headers'     => '',
+				'attachments' => [],
+			]
+		);
+
+		$this->assertSame( 1, $calls, 'A successful SES send must notify exactly once, so it logs once.' );
+	}
+
+	public function test_ses_failure_fires_failed_hook_exactly_once() {
+		$this->configure_ses();
+		add_filter(
+			'pre_http_request',
+			function () {
+				return [
+					'response' => [
+						'code'    => 400,
+						'message' => 'Bad Request',
+					],
+					'body'     => '{"message":"nope"}',
+				];
+			}
+		);
+
+		$calls = 0;
+		add_action(
+			'wp_mail_failed',
+			function () use ( &$calls ) {
+				$calls++;
+			}
+		);
+
+		Lean_SMTP_Mailer::send_via_ses(
+			null,
+			[
+				'to'          => 'rcpt@example.com',
+				'subject'     => 'Hello',
+				'message'     => 'Body',
+				'headers'     => '',
+				'attachments' => [],
+			]
+		);
+
+		$this->assertSame( 1, $calls, 'A failed SES send must fire wp_mail_failed once, so it logs once.' );
+	}
 }

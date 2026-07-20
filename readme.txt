@@ -4,7 +4,7 @@ Tags: smtp, mail, email, ses, wp_mail
 Requires at least: 6.0
 Tested up to: 7.0
 Requires PHP: 8.1
-Stable tag: 0.1.0
+Stable tag: 0.1.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -32,6 +32,11 @@ Lean SMTP makes WordPress send its mail through a real mail service instead of t
 For Amazon SES: create an IAM user limited to `ses:SendRawEmail`/`ses:SendEmail`, verify your From address (or domain) in the SES console, and, if your account is still in the SES sandbox, verify the recipient too.
 
 == Changelog ==
+
+= 0.1.1 =
+* Fixed Amazon SES sends failing with an HTTP 403 "signature does not match" error caused by the secret key being encrypted twice on its first save (WordPress runs a setting's sanitize callback twice when the option is first created). Re-enter your SES secret key (and SMTP password) after updating.
+* SES requests now sign only the required host and date headers, avoiding signature mismatches when the HTTP transport rewrites the Content-Type header.
+* Fixed failed SES sends being written to the send log twice; every send is now recorded exactly once.
 
 = 0.1.0 =
 * Initial release. SMTP and Amazon SES (API) transports for wp_mail(), From name/email with optional forcing, a test-email button, optional send logging, and AES-256 at-rest encryption of stored credentials.

@@ -153,10 +153,12 @@ class Lean_SMTP_SES {
 			]
 		);
 
+		// Sign only the required headers. Content-Type is sent but left unsigned:
+		// HTTP transports may re-case or append a charset to it, which would
+		// break a signature that covered it. SigV4 only requires host + date.
 		$sign_headers = [
-			'content-type' => 'application/json',
-			'host'         => $host,
-			'x-amz-date'   => $amz_date,
+			'host'       => $host,
+			'x-amz-date' => $amz_date,
 		];
 
 		$authorization = self::authorization_header(
