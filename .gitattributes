@@ -1,0 +1,21 @@
+# Dev-only files excluded from `git archive` (used by `make build`).
+/.DS_Store          export-ignore
+/.editorconfig      export-ignore
+/.gitattributes     export-ignore
+/.github            export-ignore
+/.gitignore         export-ignore
+/.idea              export-ignore
+/.phpcs.xml         export-ignore
+/CLAUDE.md          export-ignore
+/Dockerfile         export-ignore
+/Dockerfile.test    export-ignore
+/Makefile           export-ignore
+/README.md          export-ignore
+/bin                export-ignore
+/composer.json      export-ignore
+/composer.lock      export-ignore
+/docker-compose.test.yml export-ignore
+/docker-compose.yml export-ignore
+/logs               export-ignore
+/phpunit.xml        export-ignore
+/tests              export-ignore

@@ -1,0 +1,39 @@
+services:
+  wordpress:
+    depends_on:
+      - db
+      - mailpit
+    build: .
+    restart: always
+    ports:
+      - 8082:80
+      - 7445:443
+    environment:
+      WORDPRESS_DEBUG: true
+      WORDPRESS_DB_HOST: db:3306
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: wordpress
+      WORDPRESS_DB_NAME: wordpress
+    volumes:
+      - .:/var/www/html/wp-content/plugins/simple-smtp
+      - ./logs/:/var/log/apache2
+
+  # Local SMTP sink. Configure Simple SMTP to exercise the plugin end-to-end:
+  #   Mailer: SMTP · Host: mailpit · Port: 1025 · Encryption: None · Auth: off
+  # Everything wp_mail() sends then lands in the Mailpit UI at http://localhost:8027.
+  mailpit:
+    image: axllent/mailpit
+    restart: always
+    ports:
+      - 8027:8025
+
+  db:
+    image: mariadb:10.11
+    restart: always
+    ports:
+      - 3308:3306
+    environment:
+      MARIADB_ROOT_PASSWORD: somewordpress
+      MARIADB_DATABASE: wordpress
+      MARIADB_USER: wordpress
+      MARIADB_PASSWORD: wordpress

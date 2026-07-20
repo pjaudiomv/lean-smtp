@@ -1,0 +1,45 @@
+<?xml version='1.0'?>
+<ruleset name='SimpleSMTP'>
+    <description>Simple SMTP Coding Standards</description>
+    <file>.</file>
+
+    <arg name='encoding' value='utf-8'/>
+    <arg name='extensions' value='php'/>
+    <arg name='warning-severity' value='6'/>
+    <arg name="report" value="full"/>
+    <arg name="parallel" value="4" />
+    <arg value='s'/>
+
+    <ini name="memory_limit" value="128M"/>
+
+    <exclude-pattern>vendor/*</exclude-pattern>
+    <exclude-pattern>tests/*</exclude-pattern>
+    <exclude-pattern>bin/*</exclude-pattern>
+
+    <rule ref="WordPress-Core">
+        <exclude name="WordPress.Files.FileName.InvalidClassFileName" />
+        <exclude name="Universal.Arrays.DisallowShortArraySyntax"/>
+    </rule>
+
+    <!-- PHPMailer exposes PascalCase public properties; accessing them is not a naming choice of ours. -->
+    <rule ref="WordPress.NamingConventions.ValidVariableName">
+        <properties>
+            <property name="allowed_custom_properties" type="array">
+                <element value="Host"/>
+                <element value="Port"/>
+                <element value="Timeout"/>
+                <element value="SMTPSecure"/>
+                <element value="SMTPAutoTLS"/>
+                <element value="SMTPAuth"/>
+                <element value="Username"/>
+                <element value="Password"/>
+                <element value="Subject"/>
+                <element value="Body"/>
+                <element value="AltBody"/>
+                <element value="ContentType"/>
+                <element value="CharSet"/>
+                <element value="ErrorInfo"/>
+            </property>
+        </properties>
+    </rule>
+</ruleset>

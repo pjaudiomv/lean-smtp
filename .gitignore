@@ -1,0 +1,9 @@
+.project
+.settings/*
+.vscode/*
+.DS_Store
+.idea
+/vendor/
+logs/
+build/
+*.zip
