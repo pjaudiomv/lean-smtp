@@ -8,7 +8,7 @@
 	convertWarningsToExceptions="true"
 >
 	<testsuites>
-		<testsuite name="simple-smtp">
+		<testsuite name="lean-smtp">
 			<directory suffix=".php">./tests/</directory>
 		</testsuite>
 	</testsuites>

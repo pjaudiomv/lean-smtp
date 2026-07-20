@@ -10,18 +10,18 @@
  * deterministic given an explicit timestamp, so they are verified in the unit
  * suite against AWS's own documented SigV4 example vectors.
  *
- * @package simple-smtp
+ * @package lean-smtp
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-class Simple_SMTP_SES {
+class Lean_SMTP_SES {
 
-	const OPTION_REGION     = 'simple_smtp_ses_region';
-	const OPTION_ACCESS_KEY = 'simple_smtp_ses_access_key';
-	const OPTION_SECRET_KEY = 'simple_smtp_ses_secret_key';
+	const OPTION_REGION     = 'lean_smtp_ses_region';
+	const OPTION_ACCESS_KEY = 'lean_smtp_ses_access_key';
+	const OPTION_SECRET_KEY = 'lean_smtp_ses_secret_key';
 
 	const ALGORITHM = 'AWS4-HMAC-SHA256';
 	const SERVICE   = 'ses';
@@ -117,7 +117,7 @@ class Simple_SMTP_SES {
 	}
 
 	public static function secret_key(): string {
-		return Simple_SMTP_Crypto::decrypt( (string) get_option( self::OPTION_SECRET_KEY, '' ) );
+		return Lean_SMTP_Crypto::decrypt( (string) get_option( self::OPTION_SECRET_KEY, '' ) );
 	}
 
 	public static function is_configured(): bool {
@@ -139,7 +139,7 @@ class Simple_SMTP_SES {
 		$secret = self::secret_key();
 
 		if ( '' === $region || '' === $access || '' === $secret ) {
-			return new WP_Error( 'simple_smtp_ses_unconfigured', __( 'Amazon SES is not fully configured (region, access key, and secret key are required).', 'simple-smtp' ) );
+			return new WP_Error( 'lean_smtp_ses_unconfigured', __( 'Amazon SES is not fully configured (region, access key, and secret key are required).', 'lean-smtp' ) );
 		}
 
 		$host     = 'email.' . $region . '.amazonaws.com';
@@ -198,6 +198,6 @@ class Simple_SMTP_SES {
 		$message = is_array( $body ) && ! empty( $body['message'] ) ? (string) $body['message'] : wp_remote_retrieve_response_message( $response );
 
 		/* translators: 1: HTTP status code, 2: SES error message. */
-		return new WP_Error( 'simple_smtp_ses_http_' . $code, sprintf( __( 'SES rejected the message (HTTP %1$d): %2$s', 'simple-smtp' ), $code, $message ) );
+		return new WP_Error( 'lean_smtp_ses_http_' . $code, sprintf( __( 'SES rejected the message (HTTP %1$d): %2$s', 'lean-smtp' ), $code, $message ) );
 	}
 }

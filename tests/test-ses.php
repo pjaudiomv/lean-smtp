@@ -6,15 +6,15 @@
  * vector (access key AKIDEXAMPLE, region us-east-1, service "service",
  * timestamp 20150830T123600Z), whose expected signature is published by AWS.
  *
- * @package simple-smtp
+ * @package lean-smtp
  */
 
-class Test_Simple_SMTP_SES extends WP_UnitTestCase {
+class Test_Lean_SMTP_SES extends WP_UnitTestCase {
 
 	const SECRET = 'wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY';
 
 	public function test_authorization_header_matches_aws_get_vanilla_vector() {
-		$auth = Simple_SMTP_SES::authorization_header(
+		$auth = Lean_SMTP_SES::authorization_header(
 			'AKIDEXAMPLE',
 			self::SECRET,
 			'us-east-1',
@@ -39,7 +39,7 @@ class Test_Simple_SMTP_SES extends WP_UnitTestCase {
 	}
 
 	public function test_signing_key_is_deterministic() {
-		$key = Simple_SMTP_SES::signing_key( self::SECRET, '20150830', 'us-east-1', 'service' );
+		$key = Lean_SMTP_SES::signing_key( self::SECRET, '20150830', 'us-east-1', 'service' );
 
 		$this->assertSame( 32, strlen( $key ), 'Signing key is a 32-byte HMAC-SHA256 output.' );
 		$this->assertSame(
@@ -51,7 +51,7 @@ class Test_Simple_SMTP_SES extends WP_UnitTestCase {
 	public function test_header_order_and_whitespace_are_normalized() {
 		// Passing headers out of order and with padded values must produce the
 		// same signature as the canonical form.
-		$auth = Simple_SMTP_SES::authorization_header(
+		$auth = Lean_SMTP_SES::authorization_header(
 			'AKIDEXAMPLE',
 			self::SECRET,
 			'us-east-1',

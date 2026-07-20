@@ -15,27 +15,27 @@
  * cooperates with other plugins. "Force" makes it win over an address another
  * plugin set; otherwise it only fills in where WordPress would use its default.
  *
- * @package simple-smtp
+ * @package lean-smtp
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-class Simple_SMTP_Mailer {
+class Lean_SMTP_Mailer {
 
-	const OPTION_MAILER          = 'simple_smtp_mailer';
-	const OPTION_FROM_EMAIL      = 'simple_smtp_from_email';
-	const OPTION_FROM_NAME       = 'simple_smtp_from_name';
-	const OPTION_FORCE_FROM_MAIL = 'simple_smtp_force_from_email';
-	const OPTION_FORCE_FROM_NAME = 'simple_smtp_force_from_name';
+	const OPTION_MAILER          = 'lean_smtp_mailer';
+	const OPTION_FROM_EMAIL      = 'lean_smtp_from_email';
+	const OPTION_FROM_NAME       = 'lean_smtp_from_name';
+	const OPTION_FORCE_FROM_MAIL = 'lean_smtp_force_from_email';
+	const OPTION_FORCE_FROM_NAME = 'lean_smtp_force_from_name';
 
-	const OPTION_SMTP_HOST       = 'simple_smtp_smtp_host';
-	const OPTION_SMTP_PORT       = 'simple_smtp_smtp_port';
-	const OPTION_SMTP_ENCRYPTION = 'simple_smtp_smtp_encryption';
-	const OPTION_SMTP_AUTH       = 'simple_smtp_smtp_auth';
-	const OPTION_SMTP_USERNAME   = 'simple_smtp_smtp_username';
-	const OPTION_SMTP_PASSWORD   = 'simple_smtp_smtp_password';
+	const OPTION_SMTP_HOST       = 'lean_smtp_smtp_host';
+	const OPTION_SMTP_PORT       = 'lean_smtp_smtp_port';
+	const OPTION_SMTP_ENCRYPTION = 'lean_smtp_smtp_encryption';
+	const OPTION_SMTP_AUTH       = 'lean_smtp_smtp_auth';
+	const OPTION_SMTP_USERNAME   = 'lean_smtp_smtp_username';
+	const OPTION_SMTP_PASSWORD   = 'lean_smtp_smtp_password';
 
 	const MAILER_SMTP = 'smtp';
 	const MAILER_SES  = 'ses';
@@ -50,7 +50,7 @@ class Simple_SMTP_Mailer {
 			add_action( 'phpmailer_init', [ static::class, 'configure_smtp' ] );
 		}
 
-		if ( Simple_SMTP_Logger::enabled() ) {
+		if ( Lean_SMTP_Logger::enabled() ) {
 			add_action( 'wp_mail_succeeded', [ static::class, 'log_success' ] );
 			add_action( 'wp_mail_failed', [ static::class, 'log_failure' ] );
 		}
@@ -81,7 +81,7 @@ class Simple_SMTP_Mailer {
 	}
 
 	private static function smtp_password(): string {
-		return Simple_SMTP_Crypto::decrypt( (string) get_option( self::OPTION_SMTP_PASSWORD, '' ) );
+		return Lean_SMTP_Crypto::decrypt( (string) get_option( self::OPTION_SMTP_PASSWORD, '' ) );
 	}
 
 	/**
@@ -376,13 +376,13 @@ class Simple_SMTP_Mailer {
 			return self::fail_ses( $to, $subject, $e->getMessage() );
 		}
 
-		$result = Simple_SMTP_SES::send_raw_email( $raw );
+		$result = Lean_SMTP_SES::send_raw_email( $raw );
 
 		if ( is_wp_error( $result ) ) {
 			return self::fail_ses( $to, $subject, $result->get_error_message() );
 		}
 
-		Simple_SMTP_Logger::log( self::MAILER_SES, $to, $subject, true );
+		Lean_SMTP_Logger::log( self::MAILER_SES, $to, $subject, true );
 		return true;
 	}
 
@@ -392,7 +392,7 @@ class Simple_SMTP_Mailer {
 	 * @param string[] $to
 	 */
 	private static function fail_ses( array $to, string $subject, string $error ): bool {
-		Simple_SMTP_Logger::log( self::MAILER_SES, $to, $subject, false, $error );
+		Lean_SMTP_Logger::log( self::MAILER_SES, $to, $subject, false, $error );
 
 		$mail_error = new WP_Error();
 		$mail_error->add(
@@ -416,7 +416,7 @@ class Simple_SMTP_Mailer {
 	 * @param array $mail_data to, subject, message, headers, attachments.
 	 */
 	public static function log_success( array $mail_data ): void {
-		Simple_SMTP_Logger::log(
+		Lean_SMTP_Logger::log(
 			self::mailer(),
 			$mail_data['to'] ?? '',
 			(string) ( $mail_data['subject'] ?? '' ),
@@ -426,7 +426,7 @@ class Simple_SMTP_Mailer {
 
 	public static function log_failure( WP_Error $error ): void {
 		$data = $error->get_error_data();
-		Simple_SMTP_Logger::log(
+		Lean_SMTP_Logger::log(
 			self::mailer(),
 			is_array( $data ) ? ( $data['to'] ?? '' ) : '',
 			is_array( $data ) ? (string) ( $data['subject'] ?? '' ) : '',
@@ -446,7 +446,7 @@ class Simple_SMTP_Mailer {
 	 */
 	public static function send_test( string $to ) {
 		if ( ! is_email( $to ) ) {
-			return new WP_Error( 'simple_smtp_bad_recipient', __( 'Please enter a valid recipient email address.', 'simple-smtp' ) );
+			return new WP_Error( 'lean_smtp_bad_recipient', __( 'Please enter a valid recipient email address.', 'lean-smtp' ) );
 		}
 
 		$captured = null;
@@ -456,8 +456,8 @@ class Simple_SMTP_Mailer {
 		add_action( 'wp_mail_failed', $capture );
 
 		/* translators: %s: site name. */
-		$subject = sprintf( __( 'Simple SMTP test email from %s', 'simple-smtp' ), get_bloginfo( 'name' ) );
-		$body    = __( 'This is a test email sent by the Simple SMTP plugin. If you received it, your mail settings are working.', 'simple-smtp' );
+		$subject = sprintf( __( 'Lean SMTP test email from %s', 'lean-smtp' ), get_bloginfo( 'name' ) );
+		$body    = __( 'This is a test email sent by the Lean SMTP plugin. If you received it, your mail settings are working.', 'lean-smtp' );
 
 		$ok = wp_mail( $to, $subject, $body );
 
@@ -469,6 +469,6 @@ class Simple_SMTP_Mailer {
 
 		return $captured instanceof WP_Error
 			? $captured
-			: new WP_Error( 'simple_smtp_test_failed', __( 'The test email could not be sent. Check your settings and your host\'s outbound mail.', 'simple-smtp' ) );
+			: new WP_Error( 'lean_smtp_test_failed', __( 'The test email could not be sent. Check your settings and your host\'s outbound mail.', 'lean-smtp' ) );
 	}
 }

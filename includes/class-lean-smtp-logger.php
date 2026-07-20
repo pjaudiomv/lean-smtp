@@ -4,23 +4,23 @@
  * through the plugin (mailer used, recipients, subject, success/failure and
  * any error). Written only when logging is enabled in settings.
  *
- * @package simple-smtp
+ * @package lean-smtp
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-class Simple_SMTP_Logger {
+class Lean_SMTP_Logger {
 
-	const OPTION_ENABLED = 'simple_smtp_logging_enabled';
+	const OPTION_ENABLED = 'lean_smtp_logging_enabled';
 
 	/** How many rows the settings viewer shows and the table is trimmed to. */
 	const MAX_ROWS = 100;
 
 	public static function table(): string {
 		global $wpdb;
-		return $wpdb->prefix . 'simple_smtp_log';
+		return $wpdb->prefix . 'lean_smtp_log';
 	}
 
 	public static function enabled(): bool {

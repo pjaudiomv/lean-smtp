@@ -1,6 +1,6 @@
 <?php
 /**
- * PHPUnit bootstrap file for Simple SMTP plugin tests.
+ * PHPUnit bootstrap file for Lean SMTP plugin tests.
  *
  * Uses wp-phpunit/wp-phpunit (installed via Composer) as the test library.
  * WordPress core must be downloaded to WP_CORE_DIR (default: /tmp/wordpress).
@@ -9,21 +9,21 @@
 // Point wp-phpunit at our config file.
 putenv( 'WP_PHPUNIT__TESTS_CONFIG=' . __DIR__ . '/wp-tests-config.php' );
 
-$simple_smtp_tests_dir = dirname( __DIR__ ) . '/vendor/wp-phpunit/wp-phpunit';
+$lean_smtp_tests_dir = dirname( __DIR__ ) . '/vendor/wp-phpunit/wp-phpunit';
 
-if ( ! file_exists( "{$simple_smtp_tests_dir}/includes/functions.php" ) ) {
+if ( ! file_exists( "{$lean_smtp_tests_dir}/includes/functions.php" ) ) {
 	echo 'Could not find wp-phpunit. Run: composer install' . PHP_EOL;
 	exit( 1 );
 }
 
-require_once "{$simple_smtp_tests_dir}/includes/functions.php";
+require_once "{$lean_smtp_tests_dir}/includes/functions.php";
 
 /**
  * Load the plugin being tested.
  */
-function simple_smtp_tests_manually_load_plugin() {
-	require dirname( __DIR__ ) . '/simple-smtp.php';
+function lean_smtp_tests_manually_load_plugin() {
+	require dirname( __DIR__ ) . '/lean-smtp.php';
 }
-tests_add_filter( 'muplugins_loaded', 'simple_smtp_tests_manually_load_plugin' );
+tests_add_filter( 'muplugins_loaded', 'lean_smtp_tests_manually_load_plugin' );
 
-require "{$simple_smtp_tests_dir}/includes/bootstrap.php";
+require "{$lean_smtp_tests_dir}/includes/bootstrap.php";

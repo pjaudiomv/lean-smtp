@@ -15,10 +15,10 @@ services:
       WORDPRESS_DB_PASSWORD: wordpress
       WORDPRESS_DB_NAME: wordpress
     volumes:
-      - .:/var/www/html/wp-content/plugins/simple-smtp
+      - .:/var/www/html/wp-content/plugins/lean-smtp
       - ./logs/:/var/log/apache2
 
-  # Local SMTP sink. Configure Simple SMTP to exercise the plugin end-to-end:
+  # Local SMTP sink. Configure Lean SMTP to exercise the plugin end-to-end:
   #   Mailer: SMTP · Host: mailpit · Port: 1025 · Encryption: None · Auth: off
   # Everything wp_mail() sends then lands in the Mailpit UI at http://localhost:8027.
   mailpit:

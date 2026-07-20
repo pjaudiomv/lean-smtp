@@ -1,6 +1,6 @@
 <?xml version='1.0'?>
 <ruleset name='SimpleSMTP'>
-    <description>Simple SMTP Coding Standards</description>
+    <description>Lean SMTP Coding Standards</description>
     <file>.</file>
 
     <arg name='encoding' value='utf-8'/>

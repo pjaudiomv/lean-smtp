@@ -8,16 +8,16 @@
  * plaintext value, or a value from a site with openssl unavailable) is
  * passed through unchanged so upgrades never lose an existing password.
  *
- * @package simple-smtp
+ * @package lean-smtp
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-class Simple_SMTP_Crypto {
+class Lean_SMTP_Crypto {
 
-	const PREFIX = 'ssmtp:v1:';
+	const PREFIX = 'lsmtp:v1:';
 	const CIPHER = 'aes-256-cbc';
 
 	/**

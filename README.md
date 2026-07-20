@@ -1,4 +1,4 @@
-# Simple SMTP
+# Lean SMTP
 
 A small WordPress plugin that routes `wp_mail()` through an **SMTP** server or the **Amazon SES** API — the essentials of wp-mail-smtp, without the bulk.
 

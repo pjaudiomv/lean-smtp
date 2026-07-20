@@ -1,4 +1,4 @@
-=== Simple SMTP ===
+=== Lean SMTP ===
 Contributors: pjaudiomv
 Tags: smtp, mail, email, ses, wp_mail
 Requires at least: 6.0
@@ -12,7 +12,7 @@ Routes wp_mail() through an SMTP server or the Amazon SES API, with From identit
 
 == Description ==
 
-Simple SMTP makes WordPress send its mail through a real mail service instead of the host's default PHP mail, which improves deliverability. It is deliberately small: two transports, a handful of settings, no upsells.
+Lean SMTP makes WordPress send its mail through a real mail service instead of the host's default PHP mail, which improves deliverability. It is deliberately small: two transports, a handful of settings, no upsells.
 
 * **SMTP** — any host/port with TLS, SSL, or no encryption, optional username/password. Point it at `email-smtp.{region}.amazonaws.com` to use Amazon SES over SMTP.
 * **Amazon SES (API)** — sends through the SES v2 API using a hand-rolled AWS Signature V4 signer, so no AWS SDK is bundled.
@@ -24,7 +24,7 @@ Simple SMTP makes WordPress send its mail through a real mail service instead of
 == Installation ==
 
 1. Upload the plugin and activate it.
-2. Go to Settings → Simple SMTP.
+2. Go to Settings → Lean SMTP.
 3. Choose a mailer (SMTP or Amazon SES) and fill in the connection details.
 4. Set your From Email and From Name.
 5. Save, then use "Send a Test Email" to confirm it works.
