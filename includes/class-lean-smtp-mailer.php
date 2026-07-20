@@ -176,7 +176,7 @@ class Lean_SMTP_Mailer {
 	 * @return bool Whether the message was accepted by SES.
 	 */
 	public static function send_via_ses( $short_circuit, array $atts ): bool {
-		$atts = apply_filters( 'wp_mail', $atts );
+		$atts = apply_filters( 'wp_mail', $atts ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Deliberately re-applying a WordPress core mail hook.
 
 		$to          = $atts['to'] ?? '';
 		$subject     = (string) ( $atts['subject'] ?? '' );
@@ -281,8 +281,8 @@ class Lean_SMTP_Mailer {
 		if ( '' === $from_email ) {
 			$from_email = self::default_from_email();
 		}
-		$from_email = apply_filters( 'wp_mail_from', $from_email );
-		$from_name  = apply_filters( 'wp_mail_from_name', '' !== $from_name ? $from_name : 'WordPress' );
+		$from_email = apply_filters( 'wp_mail_from', $from_email ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Deliberately re-applying a WordPress core mail hook.
+		$from_name  = apply_filters( 'wp_mail_from_name', '' !== $from_name ? $from_name : 'WordPress' ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Deliberately re-applying a WordPress core mail hook.
 
 		try {
 			$phpmailer->setFrom( $from_email, $from_name, false );
@@ -335,7 +335,7 @@ class Lean_SMTP_Mailer {
 		if ( '' === $content_type ) {
 			$content_type = 'text/plain';
 		}
-		$content_type = apply_filters( 'wp_mail_content_type', $content_type );
+		$content_type = apply_filters( 'wp_mail_content_type', $content_type ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Deliberately re-applying a WordPress core mail hook.
 		$phpmailer->ContentType = $content_type;
 		if ( 'text/html' === $content_type ) {
 			$phpmailer->isHTML( true );
@@ -344,7 +344,7 @@ class Lean_SMTP_Mailer {
 		if ( '' === $charset ) {
 			$charset = get_bloginfo( 'charset' );
 		}
-		$phpmailer->CharSet = apply_filters( 'wp_mail_charset', $charset );
+		$phpmailer->CharSet = apply_filters( 'wp_mail_charset', $charset ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Deliberately re-applying a WordPress core mail hook.
 
 		if ( '' !== $boundary ) {
 			$phpmailer->addCustomHeader( 'Content-Type', sprintf( "%s;\n\t boundary=\"%s\"", $content_type, $boundary ) );
@@ -364,7 +364,7 @@ class Lean_SMTP_Mailer {
 		}
 
 		// Let other plugins tweak the message, exactly as core does.
-		do_action_ref_array( 'phpmailer_init', [ &$phpmailer ] );
+		do_action_ref_array( 'phpmailer_init', [ &$phpmailer ] ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Deliberately re-firing a WordPress core mail hook.
 
 		// --- Assemble MIME and hand off to SES ------------------------------
 		try {
@@ -385,16 +385,14 @@ class Lean_SMTP_Mailer {
 		// Log through the same wp_mail_succeeded hook the SMTP path uses, so a
 		// send is recorded exactly once. Core doesn't fire this when pre_wp_mail
 		// short-circuits, so we fire it ourselves (also notifies other plugins).
-		do_action(
-			'wp_mail_succeeded',
-			[
-				'to'          => $to,
-				'subject'     => $subject,
-				'message'     => $message,
-				'headers'     => $headers,
-				'attachments' => $attachments,
-			]
-		);
+		$mail_data = [
+			'to'          => $to,
+			'subject'     => $subject,
+			'message'     => $message,
+			'headers'     => $headers,
+			'attachments' => $attachments,
+		];
+		do_action( 'wp_mail_succeeded', $mail_data ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Deliberately re-firing a WordPress core mail hook.
 		return true;
 	}
 
@@ -415,7 +413,7 @@ class Lean_SMTP_Mailer {
 				'subject' => $subject,
 			]
 		);
-		do_action( 'wp_mail_failed', $mail_error );
+		do_action( 'wp_mail_failed', $mail_error ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Deliberately re-firing a WordPress core mail hook.
 
 		return false;
 	}
