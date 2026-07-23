@@ -110,6 +110,91 @@ class Test_Lean_SMTP_Mailer extends WP_UnitTestCase {
 		$this->assertStringContainsString( 'To: rcpt@example.com', $raw );
 	}
 
+	public function test_ses_send_without_bcc_omits_destination() {
+		// A plain message needs no explicit envelope; SES derives recipients
+		// from the headers, so no Bcc-stripping is needed either.
+		$this->configure_ses();
+
+		$captured = [];
+		add_filter(
+			'pre_http_request',
+			function ( $preempt, $args, $url ) use ( &$captured ) {
+				$captured['args'] = $args;
+				return [
+					'response' => [
+						'code'    => 200,
+						'message' => 'OK',
+					],
+					'body'     => '{"MessageId":"x"}',
+				];
+			},
+			10,
+			3
+		);
+
+		Lean_SMTP_Mailer::send_via_api(
+			null,
+			[
+				'to'          => 'rcpt@example.com',
+				'subject'     => 'Hello',
+				'message'     => 'Body',
+				'headers'     => '',
+				'attachments' => [],
+			]
+		);
+
+		$body = json_decode( $captured['args']['body'], true );
+		$this->assertArrayNotHasKey( 'Destination', $body );
+	}
+
+	public function test_ses_bcc_goes_in_destination_and_not_the_delivered_headers() {
+		// The privacy fix: Bcc recipients must be delivered to (via an explicit
+		// SES Destination) but must not appear in the MIME SES sends on, or
+		// every recipient would see them.
+		$this->configure_ses();
+
+		$captured = [];
+		add_filter(
+			'pre_http_request',
+			function ( $preempt, $args, $url ) use ( &$captured ) {
+				$captured['args'] = $args;
+				return [
+					'response' => [
+						'code'    => 200,
+						'message' => 'OK',
+					],
+					'body'     => '{"MessageId":"x"}',
+				];
+			},
+			10,
+			3
+		);
+
+		Lean_SMTP_Mailer::send_via_api(
+			null,
+			[
+				'to'          => 'rcpt@example.com',
+				'subject'     => 'Hello',
+				'message'     => 'Body',
+				'headers'     => "Cc: copy@example.com\nBcc: hidden@example.com",
+				'attachments' => [],
+			]
+		);
+
+		$body = json_decode( $captured['args']['body'], true );
+
+		// Delivered to: the Bcc address rides in the envelope...
+		$this->assertContains( 'hidden@example.com', $body['Destination']['BccAddresses'] );
+		$this->assertContains( 'rcpt@example.com', $body['Destination']['ToAddresses'] );
+		$this->assertContains( 'copy@example.com', $body['Destination']['CcAddresses'] );
+
+		// ...but the Bcc header is gone from the message itself.
+		$raw = base64_decode( $body['Content']['Raw']['Data'] );
+		$this->assertStringNotContainsStringIgnoringCase( 'Bcc: hidden@example.com', $raw );
+		// Cc is a visible header and must survive.
+		$this->assertStringContainsString( 'Cc: copy@example.com', $raw );
+	}
+
 	public function test_ses_send_reports_failure_on_api_error() {
 		$this->configure_ses();
 

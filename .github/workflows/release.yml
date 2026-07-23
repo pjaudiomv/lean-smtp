@@ -1,0 +1,118 @@
+name: "release"
+
+on:
+  push:
+    tags: ["*"]
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out code 🛒
+        uses: actions/checkout@v6
+
+      - name: Setup PHP 🐫
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+
+      - name: Linter 🧹
+        id: linter
+        run: make lint
+
+  test:
+    runs-on: ubuntu-24.04
+    services:
+      mysql:
+        image: mariadb:10.11
+        env:
+          MARIADB_ROOT_PASSWORD: root
+          MARIADB_DATABASE: wordpress_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+    strategy:
+      matrix:
+        php-version: ["8.3", "8.4"]
+    steps:
+      - name: Check out code 🛒
+        uses: actions/checkout@v6
+
+      - name: Setup PHP 🐫
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php-version }}
+          extensions: mysqli
+          tools: composer
+
+      - name: Install dependencies 📦
+        run: composer install --prefer-dist --no-progress
+
+      - name: Install WordPress test suite 🔧
+        run: bash bin/install-wp-tests.sh wordpress_test root root 127.0.0.1 latest
+
+      - name: Run PHPUnit 🧪
+        run: vendor/bin/phpunit --colors=always
+        env:
+          DB_HOST: 127.0.0.1
+          DB_USER: root
+          DB_PASS: root
+          DB_NAME: wordpress_test
+
+  package:
+    runs-on: ubuntu-24.04
+    needs: [lint, test]
+    permissions:
+      contents: write
+    env:
+      BUILD_DIR: "build"
+      DIST_DIR_GITHUB: "dist/github"
+      GITHUB_RELEASE_FILENAME: "lean-smtp.zip"
+      PLUGIN: "lean-smtp"
+      MAINFILE: "lean-smtp.php"
+    steps:
+      - name: Check out code 🛒
+        uses: actions/checkout@v6
+
+      - name: Build package 🔧
+        id: build-package
+        run: |
+          find ./ -type d | xargs chmod 755
+          find ./ -name '*.php' | xargs chmod 644
+          make build
+          mkdir -p "$DIST_DIR_GITHUB"
+          cp "$BUILD_DIR/$PLUGIN.zip" "$DIST_DIR_GITHUB/$GITHUB_RELEASE_FILENAME"
+          echo "ARTIFACT_PATH=$DIST_DIR_GITHUB/$GITHUB_RELEASE_FILENAME" >> "$GITHUB_ENV"
+
+      - name: Generate release notes 📝
+        if: github.ref_type == 'tag'
+        run: |
+          awk -v ver="= ${GITHUB_REF_NAME} =" '
+            /^= .* =$/ { inblock = ($0 == ver); next }
+            inblock { print }
+          ' readme.txt | awk 'NF' > changelog.txt
+          if [ ! -s changelog.txt ]; then
+            echo "Release ${GITHUB_REF_NAME}" > changelog.txt
+          fi
+          RELEASE_TYPE=$(if [[ "$GITHUB_REF_NAME" == *"beta"* ]]; then echo "true"; else echo "false"; fi)
+          echo "RELEASE_TYPE=${RELEASE_TYPE}" >> "$GITHUB_ENV"
+
+      - name: Create GitHub release 🎉
+        if: github.ref_type == 'tag'
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: ${{ env.ARTIFACT_PATH }}
+          bodyFile: "changelog.txt"
+          prerelease: ${{ env.RELEASE_TYPE }}
+
+      - name: Deploy to WordPress.org ⛴
+        if: github.ref_type == 'tag' && !contains(github.ref, 'beta')
+        id: wordpress-release
+        env:
+          WORDPRESS_USERNAME: ${{ secrets.WORDPRESS_USERNAME }}
+          WORDPRESS_PASSWORD: ${{ secrets.WORDPRESS_PASSWORD }}
+        run: ./.github/scripts/deploy-wordpress.sh
