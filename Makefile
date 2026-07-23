@@ -1,9 +1,9 @@
 COMMIT := $(shell git rev-parse --short=8 HEAD)
-ZIP_FILENAME := $(or $(ZIP_FILENAME), $(shell echo "$${PWD\#\#*/}.zip"))
-BUILD_DIR := $(or $(BUILD_DIR),"build")
+BASENAME := $(shell basename $(CURDIR))
+ZIP_FILENAME := $(or $(ZIP_FILENAME),$(BASENAME).zip)
+BUILD_DIR := $(or $(BUILD_DIR),build)
 VENDOR_AUTOLOAD := vendor/autoload.php
-BASENAME := $(shell basename $(PWD))
-ZIP_FILE := build/$(BASENAME).zip
+ZIP_FILE := $(BUILD_DIR)/$(BASENAME).zip
 
 ifeq ($(PROD)x, x)
 	COMPOSER_ARGS := --prefer-dist --no-progress
@@ -15,8 +15,8 @@ help:  ## Print the help documentation
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
 
 $(ZIP_FILE):
-	git archive --format=zip --worktree-attributes --prefix=$(BASENAME)/ --output=${ZIP_FILENAME} $(COMMIT)
-	mkdir -p ${BUILD_DIR} && mv ${ZIP_FILENAME} ${BUILD_DIR}/
+	mkdir -p $(BUILD_DIR)
+	git archive --format=zip --worktree-attributes --prefix=$(BASENAME)/ --output=$(BUILD_DIR)/$(ZIP_FILENAME) $(COMMIT)
 
 .PHONY: build
 build: $(ZIP_FILE)  ## Build
