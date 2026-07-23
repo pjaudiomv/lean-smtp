@@ -23,6 +23,7 @@ require_once LEAN_SMTP_DIR . 'includes/class-lean-smtp-crypto.php';
 require_once LEAN_SMTP_DIR . 'includes/class-lean-smtp-config.php';
 require_once LEAN_SMTP_DIR . 'includes/class-lean-smtp-logger.php';
 require_once LEAN_SMTP_DIR . 'includes/interface-lean-smtp-api-transport.php';
+require_once LEAN_SMTP_DIR . 'includes/trait-lean-smtp-mime.php';
 require_once LEAN_SMTP_DIR . 'includes/class-lean-smtp-ses.php';
 require_once LEAN_SMTP_DIR . 'includes/class-lean-smtp-mailgun.php';
 require_once LEAN_SMTP_DIR . 'includes/class-lean-smtp-resend.php';

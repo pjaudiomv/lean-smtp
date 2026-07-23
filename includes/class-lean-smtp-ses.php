@@ -19,6 +19,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 class Lean_SMTP_SES implements Lean_SMTP_Api_Transport {
 
+	use Lean_SMTP_Mime;
+
 	const OPTION_REGION     = 'lean_smtp_ses_region';
 	const OPTION_ACCESS_KEY = 'lean_smtp_ses_access_key';
 	const OPTION_SECRET_KEY = 'lean_smtp_ses_secret_key';
@@ -133,22 +135,63 @@ class Lean_SMTP_SES implements Lean_SMTP_Api_Transport {
 	// -------------------------------------------------------------------------
 
 	/**
-	 * SES takes the message as raw MIME, so the assembled PHPMailer needs no
-	 * translation — just its bytes.
+	 * SES takes the message as raw MIME, and normally derives recipients from
+	 * its headers — so a plain message needs no translation, just its bytes.
+	 *
+	 * A Bcc is the exception: its header can't stay (it would disclose the
+	 * hidden recipients to everyone), but dropping it would also drop those
+	 * recipients, since headers are all SES has to go on. So *only* when a Bcc
+	 * is present do we strip the header and hand SES an explicit Destination
+	 * instead — leaving every other send on the unchanged, header-derived path.
 	 *
 	 * @param PHPMailer\PHPMailer\PHPMailer $phpmailer Assembled, `preSend()` already called.
 	 * @return true|WP_Error
 	 */
 	public static function send( PHPMailer\PHPMailer\PHPMailer $phpmailer ) {
-		return self::send_raw_email( $phpmailer->getSentMIMEMessage() );
+		$bcc = self::addresses( $phpmailer->getBccAddresses() );
+		if ( empty( $bcc ) ) {
+			return self::send_raw_email( $phpmailer->getSentMIMEMessage() );
+		}
+
+		$destination = array_filter(
+			[
+				'ToAddresses'  => self::addresses( $phpmailer->getToAddresses() ),
+				'CcAddresses'  => self::addresses( $phpmailer->getCcAddresses() ),
+				'BccAddresses' => $bcc,
+			]
+		);
+
+		return self::send_raw_email( self::strip_bcc_header( $phpmailer->getSentMIMEMessage() ), $destination );
+	}
+
+	/**
+	 * Flatten PHPMailer's [ address, name ] recipient entries to bare addresses
+	 * for a SES Destination. The friendly name still rides along in the MIME
+	 * headers; the envelope only needs the address.
+	 *
+	 * @param array<int, array> $entries
+	 * @return string[]
+	 */
+	private static function addresses( array $entries ): array {
+		$addresses = [];
+		foreach ( $entries as $entry ) {
+			if ( isset( $entry[0] ) && '' !== $entry[0] ) {
+				$addresses[] = (string) $entry[0];
+			}
+		}
+		return $addresses;
 	}
 
 	/**
 	 * Send a raw (already MIME-encoded) message through SES.
 	 *
+	 * @param string   $raw_mime    The assembled message.
+	 * @param array    $destination Optional SES Destination (To/Cc/BccAddresses).
+	 *                              When given, SES uses it for the envelope
+	 *                              instead of reading the message headers.
 	 * @return true|WP_Error True on success, WP_Error describing the failure.
 	 */
-	public static function send_raw_email( string $raw_mime ) {
+	public static function send_raw_email( string $raw_mime, array $destination = [] ) {
 		$region = self::region();
 		$access = self::access_key();
 		$secret = self::secret_key();
@@ -157,16 +200,19 @@ class Lean_SMTP_SES implements Lean_SMTP_Api_Transport {
 			return new WP_Error( 'lean_smtp_ses_unconfigured', __( 'Amazon SES is not fully configured (region, access key, and secret key are required).', 'lean-smtp' ) );
 		}
 
+		$request = [
+			'Content' => [
+				'Raw' => [ 'Data' => base64_encode( $raw_mime ) ],
+			],
+		];
+		if ( ! empty( $destination ) ) {
+			$request['Destination'] = $destination;
+		}
+
 		$host     = 'email.' . $region . '.amazonaws.com';
 		$uri      = '/v2/email/outbound-emails';
 		$amz_date = gmdate( 'Ymd\THis\Z' );
-		$payload  = wp_json_encode(
-			[
-				'Content' => [
-					'Raw' => [ 'Data' => base64_encode( $raw_mime ) ],
-				],
-			]
-		);
+		$payload  = wp_json_encode( $request );
 
 		// Sign only the required headers. Content-Type is sent but left unsigned:
 		// HTTP transports may re-case or append a charset to it, which would

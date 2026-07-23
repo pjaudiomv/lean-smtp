@@ -1,0 +1,28 @@
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Lean SMTP">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="256" y2="256" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6366F1"/>
+      <stop offset="1" stop-color="#3F32C4"/>
+    </linearGradient>
+    <linearGradient id="arrow" x1="52" y1="188" x2="212" y2="188" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FBBF24"/>
+      <stop offset="1" stop-color="#F59E0B"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Squircle backdrop -->
+  <rect width="256" height="256" rx="60" fill="url(#bg)"/>
+
+  <!-- Envelope -->
+  <g>
+    <rect x="56" y="60" width="144" height="100" rx="14" fill="#FFFFFF"/>
+    <!-- Flap fold -->
+    <path d="M66 74 L128 120 L190 74" fill="none" stroke="#3F32C4" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <!-- Routing arrow -->
+  <g>
+    <rect x="58" y="182" width="118" height="15" rx="7.5" fill="url(#arrow)"/>
+    <path d="M170 165 L206 189.5 L170 214 Z" fill="url(#arrow)"/>
+  </g>
+</svg>

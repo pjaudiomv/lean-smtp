@@ -56,11 +56,32 @@ Any setting can be defined as a constant instead of saved in the database. The c
 
 Secrets defined this way are used as-is and are never written to the database. Run `wp lean-smtp status` to see every setting and where it came from.
 
+== External services ==
+
+Lean SMTP sends email through whichever mail service you configure. When — and only when — you select an API transport and your site sends mail, the plugin connects to that provider's HTTPS API and transmits the message being sent (recipients, subject, body, headers, and any attachments) along with the credentials you entered, so the provider can authenticate the request and deliver the message. Nothing is sent until you configure and select a transport, and the plugin contacts no other services: there is no telemetry, tracking, or analytics.
+
+The provider you choose is the data controller for the mail you route through it. Review its terms and privacy policy:
+
+* Amazon SES — sends to `email.{region}.amazonaws.com`. Terms: https://aws.amazon.com/service-terms/ · Privacy: https://aws.amazon.com/privacy/
+* Mailgun — sends to `api.mailgun.net` or `api.eu.mailgun.net`. Terms: https://www.mailgun.com/legal/terms/ · Privacy: https://www.mailgun.com/legal/privacy-policy/
+* Resend — sends to `api.resend.com`. Terms: https://resend.com/legal/terms-of-service · Privacy: https://resend.com/legal/privacy-policy
+
+The SMTP transport connects only to the host you configure and bundles no third-party service.
+
+== Screenshots ==
+
+1. Settings page: pick a mailer, set the From identity, and configure the transport. A dismissible notice warns when the last send failed.
+2. Amazon SES — region and IAM access key; the secret key is stored encrypted and never shown.
+3. Mailgun — sending domain, US/EU region, and API key.
+4. Resend — a single API key.
+5. Send a test email, and review the optional send log of recent attempts.
+
 == Changelog ==
 
 = 0.2.0 =
 * Added a Mailgun transport (US and EU regions), sending the assembled message as MIME.
 * Added a Resend transport.
+* Bcc recipients on API sends are now carried as an explicit envelope and the Bcc header is stripped from the delivered message, so hidden recipients are never disclosed to other recipients.
 * Any setting can now be pinned in wp-config.php as an upper-case constant; a pinned setting renders read-only on the settings page and is left untouched when the form is saved.
 * Added an admin notice when a send fails, so a silently broken mailer is noticed. It clears itself after the next successful send.
 * Added WP-CLI commands: `wp lean-smtp test [<recipient>]` and `wp lean-smtp status`.

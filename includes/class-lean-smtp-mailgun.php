@@ -19,6 +19,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 class Lean_SMTP_Mailgun implements Lean_SMTP_Api_Transport {
 
+	use Lean_SMTP_Mime;
+
 	const OPTION_DOMAIN  = 'lean_smtp_mailgun_domain';
 	const OPTION_API_KEY = 'lean_smtp_mailgun_api_key';
 	const OPTION_REGION  = 'lean_smtp_mailgun_region';
@@ -129,38 +131,6 @@ class Lean_SMTP_Mailgun implements Lean_SMTP_Api_Transport {
 			}
 		}
 		return array_values( array_unique( $addresses ) );
-	}
-
-	/**
-	 * Remove the Bcc header from the message.
-	 *
-	 * PHPMailer writes one because it assumes a sendmail-style transport will
-	 * consume and drop it; nothing in this path would. Mailgun does not
-	 * document stripping it either, so leaving it in risks disclosing hidden
-	 * recipients to everyone on the message. Delivery is unaffected — those
-	 * addresses travel as `to` form fields, which is the envelope Mailgun uses.
-	 */
-	private static function strip_bcc_header( string $raw_mime ): string {
-		$split = strpos( $raw_mime, "\r\n\r\n" );
-		if ( false === $split ) {
-			return $raw_mime;
-		}
-
-		$kept    = [];
-		$dropped = false;
-
-		foreach ( explode( "\r\n", substr( $raw_mime, 0, $split ) ) as $line ) {
-			$is_continuation = isset( $line[0] ) && ( ' ' === $line[0] || "\t" === $line[0] );
-			if ( $dropped && $is_continuation ) {
-				continue; // A folded second line of the Bcc header.
-			}
-			$dropped = 0 === stripos( $line, 'bcc:' );
-			if ( ! $dropped ) {
-				$kept[] = $line;
-			}
-		}
-
-		return implode( "\r\n", $kept ) . substr( $raw_mime, $split );
 	}
 
 	/**
