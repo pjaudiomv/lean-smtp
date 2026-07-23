@@ -33,6 +33,8 @@
                 <element value="SMTPAuth"/>
                 <element value="Username"/>
                 <element value="Password"/>
+                <element value="From"/>
+                <element value="FromName"/>
                 <element value="Subject"/>
                 <element value="Body"/>
                 <element value="AltBody"/>

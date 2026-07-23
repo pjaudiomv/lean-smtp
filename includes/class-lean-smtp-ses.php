@@ -17,7 +17,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-class Lean_SMTP_SES {
+class Lean_SMTP_SES implements Lean_SMTP_Api_Transport {
 
 	const OPTION_REGION     = 'lean_smtp_ses_region';
 	const OPTION_ACCESS_KEY = 'lean_smtp_ses_access_key';
@@ -25,6 +25,10 @@ class Lean_SMTP_SES {
 
 	const ALGORITHM = 'AWS4-HMAC-SHA256';
 	const SERVICE   = 'ses';
+
+	public static function label(): string {
+		return __( 'Amazon SES', 'lean-smtp' );
+	}
 
 	// -------------------------------------------------------------------------
 	// Signing (pure)
@@ -109,15 +113,15 @@ class Lean_SMTP_SES {
 	// -------------------------------------------------------------------------
 
 	public static function region(): string {
-		return trim( (string) get_option( self::OPTION_REGION, '' ) );
+		return Lean_SMTP_Config::get_string( self::OPTION_REGION );
 	}
 
 	public static function access_key(): string {
-		return trim( (string) get_option( self::OPTION_ACCESS_KEY, '' ) );
+		return Lean_SMTP_Config::get_string( self::OPTION_ACCESS_KEY );
 	}
 
 	public static function secret_key(): string {
-		return Lean_SMTP_Crypto::decrypt( (string) get_option( self::OPTION_SECRET_KEY, '' ) );
+		return Lean_SMTP_Config::get_secret( self::OPTION_SECRET_KEY );
 	}
 
 	public static function is_configured(): bool {
@@ -127,6 +131,17 @@ class Lean_SMTP_SES {
 	// -------------------------------------------------------------------------
 	// Send
 	// -------------------------------------------------------------------------
+
+	/**
+	 * SES takes the message as raw MIME, so the assembled PHPMailer needs no
+	 * translation — just its bytes.
+	 *
+	 * @param PHPMailer\PHPMailer\PHPMailer $phpmailer Assembled, `preSend()` already called.
+	 * @return true|WP_Error
+	 */
+	public static function send( PHPMailer\PHPMailer\PHPMailer $phpmailer ) {
+		return self::send_raw_email( $phpmailer->getSentMIMEMessage() );
+	}
 
 	/**
 	 * Send a raw (already MIME-encoded) message through SES.

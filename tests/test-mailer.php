@@ -61,6 +61,7 @@ class Test_Lean_SMTP_Mailer extends WP_UnitTestCase {
 	// -------------------------------------------------------------------------
 
 	private function configure_ses() {
+		update_option( Lean_SMTP_Mailer::OPTION_MAILER, Lean_SMTP_Mailer::MAILER_SES );
 		update_option( Lean_SMTP_SES::OPTION_REGION, 'us-east-1' );
 		update_option( Lean_SMTP_SES::OPTION_ACCESS_KEY, 'AKIDEXAMPLE' );
 		update_option( Lean_SMTP_SES::OPTION_SECRET_KEY, 'test-secret' );
@@ -87,7 +88,7 @@ class Test_Lean_SMTP_Mailer extends WP_UnitTestCase {
 			3
 		);
 
-		$ok = Lean_SMTP_Mailer::send_via_ses(
+		$ok = Lean_SMTP_Mailer::send_via_api(
 			null,
 			[
 				'to'          => 'rcpt@example.com',
@@ -125,7 +126,7 @@ class Test_Lean_SMTP_Mailer extends WP_UnitTestCase {
 			}
 		);
 
-		$ok = Lean_SMTP_Mailer::send_via_ses(
+		$ok = Lean_SMTP_Mailer::send_via_api(
 			null,
 			[
 				'to'          => 'rcpt@example.com',
@@ -179,7 +180,7 @@ class Test_Lean_SMTP_Mailer extends WP_UnitTestCase {
 			}
 		);
 
-		Lean_SMTP_Mailer::send_via_ses(
+		Lean_SMTP_Mailer::send_via_api(
 			null,
 			[
 				'to'          => 'rcpt@example.com',
@@ -216,7 +217,7 @@ class Test_Lean_SMTP_Mailer extends WP_UnitTestCase {
 			}
 		);
 
-		Lean_SMTP_Mailer::send_via_ses(
+		Lean_SMTP_Mailer::send_via_api(
 			null,
 			[
 				'to'          => 'rcpt@example.com',

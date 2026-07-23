@@ -26,7 +26,12 @@ $lean_smtp_options = [
 	'lean_smtp_ses_region',
 	'lean_smtp_ses_access_key',
 	'lean_smtp_ses_secret_key',
+	'lean_smtp_mailgun_domain',
+	'lean_smtp_mailgun_region',
+	'lean_smtp_mailgun_api_key',
+	'lean_smtp_resend_api_key',
 	'lean_smtp_logging_enabled',
+	'lean_smtp_last_failure',
 ];
 
 foreach ( $lean_smtp_options as $lean_smtp_option ) {

@@ -6,9 +6,11 @@
  *   - SMTP  — configured on the PHPMailer instance in `phpmailer_init`, letting
  *             WordPress's own wp_mail() do the sending. (Point this at
  *             email-smtp.{region}.amazonaws.com to use SES over SMTP.)
- *   - SES   — the Amazon SES v2 API. wp_mail() is short-circuited via
- *             `pre_wp_mail`; PHPMailer assembles the MIME message and the raw
- *             bytes are handed to the SES API.
+ *   - API   — Amazon SES, Mailgun or Resend. wp_mail() is short-circuited via
+ *             `pre_wp_mail`; this class assembles the message with PHPMailer
+ *             and hands it to a Lean_SMTP_Api_Transport, which adds only auth
+ *             and body shape. Every API provider shares that one assembly, so
+ *             core's wp_mail() semantics are reproduced in exactly one place.
  *
  * The From identity (email + name) is applied through the standard
  * `wp_mail_from` / `wp_mail_from_name` filters so it governs both paths and
@@ -37,15 +39,38 @@ class Lean_SMTP_Mailer {
 	const OPTION_SMTP_USERNAME   = 'lean_smtp_smtp_username';
 	const OPTION_SMTP_PASSWORD   = 'lean_smtp_smtp_password';
 
-	const MAILER_SMTP = 'smtp';
-	const MAILER_SES  = 'ses';
+	const MAILER_SMTP    = 'smtp';
+	const MAILER_SES     = 'ses';
+	const MAILER_MAILGUN = 'mailgun';
+	const MAILER_RESEND  = 'resend';
+
+	/**
+	 * The API transports, keyed by their mailer slug. SMTP is deliberately
+	 * absent: it isn't a transport class, it's PHPMailer configuration.
+	 *
+	 * @return array<string, string> Slug => class implementing Lean_SMTP_Api_Transport.
+	 */
+	public static function transports(): array {
+		return [
+			self::MAILER_SES     => 'Lean_SMTP_SES',
+			self::MAILER_MAILGUN => 'Lean_SMTP_Mailgun',
+			self::MAILER_RESEND  => 'Lean_SMTP_Resend',
+		];
+	}
+
+	/**
+	 * The transport class for the selected mailer, or null when sending over SMTP.
+	 */
+	public static function transport(): ?string {
+		return self::transports()[ self::mailer() ] ?? null;
+	}
 
 	public static function init(): void {
 		add_filter( 'wp_mail_from', [ static::class, 'filter_from_email' ] );
 		add_filter( 'wp_mail_from_name', [ static::class, 'filter_from_name' ] );
 
-		if ( self::MAILER_SES === self::mailer() ) {
-			add_filter( 'pre_wp_mail', [ static::class, 'send_via_ses' ], 10, 2 );
+		if ( null !== self::transport() ) {
+			add_filter( 'pre_wp_mail', [ static::class, 'send_via_api' ], 10, 2 );
 		} else {
 			add_action( 'phpmailer_init', [ static::class, 'configure_smtp' ] );
 		}
@@ -61,27 +86,40 @@ class Lean_SMTP_Mailer {
 	// -------------------------------------------------------------------------
 
 	public static function mailer(): string {
-		return self::MAILER_SES === get_option( self::OPTION_MAILER ) ? self::MAILER_SES : self::MAILER_SMTP;
+		$mailer = Lean_SMTP_Config::get_string( self::OPTION_MAILER, self::MAILER_SMTP );
+		return isset( self::transports()[ $mailer ] ) ? $mailer : self::MAILER_SMTP;
 	}
 
 	public static function from_email(): string {
-		return trim( (string) get_option( self::OPTION_FROM_EMAIL, '' ) );
+		return Lean_SMTP_Config::get_string( self::OPTION_FROM_EMAIL );
 	}
 
 	public static function from_name(): string {
-		return trim( (string) get_option( self::OPTION_FROM_NAME, '' ) );
+		return Lean_SMTP_Config::get_string( self::OPTION_FROM_NAME );
 	}
 
 	private static function force_from_email(): bool {
-		return '1' === (string) get_option( self::OPTION_FORCE_FROM_MAIL, '0' );
+		return Lean_SMTP_Config::get_bool( self::OPTION_FORCE_FROM_MAIL );
 	}
 
 	private static function force_from_name(): bool {
-		return '1' === (string) get_option( self::OPTION_FORCE_FROM_NAME, '0' );
+		return Lean_SMTP_Config::get_bool( self::OPTION_FORCE_FROM_NAME );
 	}
 
 	private static function smtp_password(): string {
-		return Lean_SMTP_Crypto::decrypt( (string) get_option( self::OPTION_SMTP_PASSWORD, '' ) );
+		return Lean_SMTP_Config::get_secret( self::OPTION_SMTP_PASSWORD );
+	}
+
+	/**
+	 * Whether the selected mailer has everything it needs to send. SMTP only
+	 * really requires a host; the API transports each answer for themselves.
+	 */
+	public static function is_configured(): bool {
+		$transport = self::transport();
+		if ( null === $transport ) {
+			return '' !== Lean_SMTP_Config::get_string( self::OPTION_SMTP_HOST );
+		}
+		return (bool) call_user_func( [ $transport, 'is_configured' ] );
 	}
 
 	/**
@@ -135,17 +173,17 @@ class Lean_SMTP_Mailer {
 	 * @param PHPMailer\PHPMailer\PHPMailer $phpmailer
 	 */
 	public static function configure_smtp( $phpmailer ): void {
-		$host = trim( (string) get_option( self::OPTION_SMTP_HOST, '' ) );
+		$host = Lean_SMTP_Config::get_string( self::OPTION_SMTP_HOST );
 		if ( '' === $host ) {
 			return; // Not configured — leave WordPress's default transport alone.
 		}
 
 		$phpmailer->isSMTP();
 		$phpmailer->Host    = $host;
-		$phpmailer->Port    = (int) get_option( self::OPTION_SMTP_PORT, 587 );
+		$phpmailer->Port    = (int) Lean_SMTP_Config::get( self::OPTION_SMTP_PORT, 587 );
 		$phpmailer->Timeout = 15;
 
-		$encryption = (string) get_option( self::OPTION_SMTP_ENCRYPTION, 'tls' );
+		$encryption = Lean_SMTP_Config::get_string( self::OPTION_SMTP_ENCRYPTION, 'tls' );
 		if ( 'none' === $encryption ) {
 			$phpmailer->SMTPSecure  = '';
 			$phpmailer->SMTPAutoTLS = false;
@@ -153,9 +191,9 @@ class Lean_SMTP_Mailer {
 			$phpmailer->SMTPSecure = $encryption; // 'ssl' or 'tls' (STARTTLS).
 		}
 
-		if ( '1' === (string) get_option( self::OPTION_SMTP_AUTH, '1' ) ) {
+		if ( Lean_SMTP_Config::get_bool( self::OPTION_SMTP_AUTH, true ) ) {
 			$phpmailer->SMTPAuth = true;
-			$phpmailer->Username = (string) get_option( self::OPTION_SMTP_USERNAME, '' );
+			$phpmailer->Username = Lean_SMTP_Config::get_string( self::OPTION_SMTP_USERNAME );
 			$phpmailer->Password = self::smtp_password();
 		} else {
 			$phpmailer->SMTPAuth = false;
@@ -163,19 +201,19 @@ class Lean_SMTP_Mailer {
 	}
 
 	// -------------------------------------------------------------------------
-	// SES path (pre_wp_mail short-circuit)
+	// API path (pre_wp_mail short-circuit)
 	// -------------------------------------------------------------------------
 
 	/**
-	 * Assemble the message with PHPMailer and deliver it through the SES API.
-	 * Mirrors WordPress core's wp_mail() header/recipient handling so callers
-	 * behave identically, then swaps the final send for a raw SES API call.
+	 * Assemble the message with PHPMailer and hand it to the selected API
+	 * transport. Mirrors WordPress core's wp_mail() header/recipient handling
+	 * so callers behave identically, then swaps the final send for an API call.
 	 *
 	 * @param null|bool $short_circuit Prior filter value.
 	 * @param array     $atts          to, subject, message, headers, attachments.
-	 * @return bool Whether the message was accepted by SES.
+	 * @return bool Whether the message was accepted by the provider.
 	 */
-	public static function send_via_ses( $short_circuit, array $atts ): bool {
+	public static function send_via_api( $short_circuit, array $atts ): bool {
 		$atts = apply_filters( 'wp_mail', $atts ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Deliberately re-applying a WordPress core mail hook.
 
 		$to          = $atts['to'] ?? '';
@@ -287,7 +325,7 @@ class Lean_SMTP_Mailer {
 		try {
 			$phpmailer->setFrom( $from_email, $from_name, false );
 		} catch ( PHPMailer\PHPMailer\Exception $e ) {
-			return self::fail_ses( $to, $subject, $e->getMessage() );
+			return self::fail_api( $to, $subject, $e->getMessage() );
 		}
 
 		$phpmailer->Subject = $subject;
@@ -366,20 +404,27 @@ class Lean_SMTP_Mailer {
 		// Let other plugins tweak the message, exactly as core does.
 		do_action_ref_array( 'phpmailer_init', [ &$phpmailer ] ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Deliberately re-firing a WordPress core mail hook.
 
-		// --- Assemble MIME and hand off to SES ------------------------------
-		try {
-			if ( ! $phpmailer->preSend() ) {
-				return self::fail_ses( $to, $subject, $phpmailer->ErrorInfo );
-			}
-			$raw = $phpmailer->getSentMIMEMessage();
-		} catch ( PHPMailer\PHPMailer\Exception $e ) {
-			return self::fail_ses( $to, $subject, $e->getMessage() );
+		// --- Assemble and hand off to the transport --------------------------
+		$transport = self::transport();
+		if ( null === $transport ) {
+			return self::fail_api( $to, $subject, __( 'No API transport is selected.', 'lean-smtp' ) );
 		}
 
-		$result = Lean_SMTP_SES::send_raw_email( $raw );
+		// preSend() validates the message and builds the MIME body. Transports
+		// that want raw MIME read it back with getSentMIMEMessage(); the rest
+		// read the structured properties it has just finalised.
+		try {
+			if ( ! $phpmailer->preSend() ) {
+				return self::fail_api( $to, $subject, $phpmailer->ErrorInfo );
+			}
+		} catch ( PHPMailer\PHPMailer\Exception $e ) {
+			return self::fail_api( $to, $subject, $e->getMessage() );
+		}
+
+		$result = call_user_func( [ $transport, 'send' ], $phpmailer );
 
 		if ( is_wp_error( $result ) ) {
-			return self::fail_ses( $to, $subject, $result->get_error_message() );
+			return self::fail_api( $to, $subject, $result->get_error_message() );
 		}
 
 		// Log through the same wp_mail_succeeded hook the SMTP path uses, so a
@@ -403,7 +448,7 @@ class Lean_SMTP_Mailer {
 	 *
 	 * @param string[] $to
 	 */
-	private static function fail_ses( array $to, string $subject, string $error ): bool {
+	private static function fail_api( array $to, string $subject, string $error ): bool {
 		$mail_error = new WP_Error();
 		$mail_error->add(
 			'wp_mail_failed',
@@ -469,7 +514,11 @@ class Lean_SMTP_Mailer {
 		$subject = sprintf( __( 'Lean SMTP test email from %s', 'lean-smtp' ), get_bloginfo( 'name' ) );
 		$body    = __( 'This is a test email sent by the Lean SMTP plugin. If you received it, your mail settings are working.', 'lean-smtp' );
 
+		// A deliberate test reports its own result inline; it shouldn't also
+		// raise the background "mail is failing" notice.
+		Lean_SMTP_Notices::suspend();
 		$ok = wp_mail( $to, $subject, $body );
+		Lean_SMTP_Notices::resume();
 
 		remove_action( 'wp_mail_failed', $capture );
 

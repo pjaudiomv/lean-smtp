@@ -4,34 +4,67 @@ Tags: smtp, mail, email, ses, wp_mail
 Requires at least: 6.0
 Tested up to: 7.0
 Requires PHP: 8.1
-Stable tag: 0.1.1
+Stable tag: 0.2.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Routes wp_mail() through an SMTP server or the Amazon SES API, with From identity control, a test-email button, and optional send logging.
+Routes wp_mail() through an SMTP server or the Amazon SES, Mailgun, or Resend API, with From identity control, wp-config.php overrides, and failure alerts.
 
 == Description ==
 
-Lean SMTP makes WordPress send its mail through a real mail service instead of the host's default PHP mail, which improves deliverability. It is deliberately small: two transports, a handful of settings, no upsells.
+Lean SMTP makes WordPress send its mail through a real mail service instead of the host's default PHP mail, which improves deliverability. It is deliberately small: a handful of transports, a handful of settings, no upsells.
 
-* **SMTP** — any host/port with TLS, SSL, or no encryption, optional username/password. Point it at `email-smtp.{region}.amazonaws.com` to use Amazon SES over SMTP.
-* **Amazon SES (API)** — sends through the SES v2 API using a hand-rolled AWS Signature V4 signer, so no AWS SDK is bundled.
+Every provider below also offers plain SMTP, so the SMTP transport alone covers all of them. The API transports exist for hosts that block outbound mail ports (25/465/587), which is common on shared hosting and some managed platforms.
+
+* **SMTP** — any host/port with TLS, SSL, or no encryption, optional username/password.
+* **Amazon SES (API)** — the SES v2 API, signed with a hand-rolled AWS Signature V4 signer, so no AWS SDK is bundled.
+* **Mailgun (API)** — US or EU region, sending the message as MIME so attachments and formatting survive untouched.
+* **Resend (API)** — a single API key, nothing else to configure.
 * **From identity** — set the From name and address, and optionally force them over anything another plugin sets.
+* **wp-config.php overrides** — pin any setting in code instead of the database, so credentials can live in environment variables and never diverge between environments.
+* **Failure alerts** — an admin notice when mail stops going out, so a broken mailer isn't discovered via missed password resets. It clears itself once mail works again.
+* **WP-CLI** — `wp lean-smtp test` and `wp lean-smtp status`.
 * **Test email** — a button on the settings page to confirm your configuration works.
 * **Send log** — optional; records the most recent sends (recipient, subject, result) with a viewer and a clear button.
-* **Encrypted secrets** — the SMTP password and SES secret key are stored AES-256 encrypted, keyed to your site salts.
+* **Encrypted secrets** — stored passwords and API keys are AES-256 encrypted, keyed to your site salts.
+
+Deliberately not included: Gmail and Microsoft 365 OAuth. Both need an OAuth consent flow, refresh-token storage, and (for Google) app verification — more machinery than the rest of this plugin combined. Use an app password or a provider above.
 
 == Installation ==
 
 1. Upload the plugin and activate it.
 2. Go to Settings → Lean SMTP.
-3. Choose a mailer (SMTP or Amazon SES) and fill in the connection details.
+3. Choose a mailer and fill in the connection details.
 4. Set your From Email and From Name.
 5. Save, then use "Send a Test Email" to confirm it works.
 
 For Amazon SES: create an IAM user limited to `ses:SendRawEmail`/`ses:SendEmail`, verify your From address (or domain) in the SES console, and, if your account is still in the SES sandbox, verify the recipient too.
 
+For Mailgun: use the sending domain exactly as it appears in your Mailgun dashboard, and pick the region matching the account the key was issued in — a US key is not valid against the EU stack.
+
+For Resend: create an API key with send permission and verify your From domain.
+
+== Configuring in wp-config.php ==
+
+Any setting can be defined as a constant instead of saved in the database. The constant name is the option name in upper case, and it always wins — the settings page shows the field as read-only and names the constant, so what you see is always what is in force. Removing the constant restores whatever was saved before.
+
+    define( 'LEAN_SMTP_MAILER', 'ses' );
+    define( 'LEAN_SMTP_FROM_EMAIL', 'noreply@example.com' );
+    define( 'LEAN_SMTP_SES_REGION', 'us-east-1' );
+    define( 'LEAN_SMTP_SES_ACCESS_KEY', 'AKIA…' );
+    define( 'LEAN_SMTP_SES_SECRET_KEY', getenv( 'SES_SECRET_KEY' ) );
+
+Secrets defined this way are used as-is and are never written to the database. Run `wp lean-smtp status` to see every setting and where it came from.
+
 == Changelog ==
+
+= 0.2.0 =
+* Added a Mailgun transport (US and EU regions), sending the assembled message as MIME.
+* Added a Resend transport.
+* Any setting can now be pinned in wp-config.php as an upper-case constant; a pinned setting renders read-only on the settings page and is left untouched when the form is saved.
+* Added an admin notice when a send fails, so a silently broken mailer is noticed. It clears itself after the next successful send.
+* Added WP-CLI commands: `wp lean-smtp test [<recipient>]` and `wp lean-smtp status`.
+* The API transports now share one message assembly behind a Lean_SMTP_Api_Transport interface, so all of them reproduce core's wp_mail() semantics identically.
 
 = 0.1.1 =
 * Fixed Amazon SES sends failing with an HTTP 403 "signature does not match" error caused by the secret key being encrypted twice on its first save (WordPress runs a setting's sanitize callback twice when the option is first created). Re-enter your SES secret key (and SMTP password) after updating.

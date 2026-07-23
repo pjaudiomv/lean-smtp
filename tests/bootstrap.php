@@ -18,6 +18,12 @@ if ( ! file_exists( "{$lean_smtp_tests_dir}/includes/functions.php" ) ) {
 
 require_once "{$lean_smtp_tests_dir}/includes/functions.php";
 
+// Stand in for wp-config.php constants so the override path in
+// Lean_SMTP_Config is exercised under test. The SMTP username and password are
+// pinned because nothing else in the suite depends on their stored values.
+define( 'LEAN_SMTP_SMTP_USERNAME', 'pinned-user' );
+define( 'LEAN_SMTP_SMTP_PASSWORD', 'pinned-pass' );
+
 /**
  * Load the plugin being tested.
  */
