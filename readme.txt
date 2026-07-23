@@ -8,7 +8,7 @@ Stable tag: 0.2.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Routes wp_mail() through an SMTP server or the Amazon SES, Mailgun, or Resend API, with From identity control, wp-config.php overrides, and failure alerts.
+Route wp_mail() through SMTP or the Amazon SES, Mailgun, or Resend API — with From control, wp-config overrides, and mail-failure alerts.
 
 == Description ==
 
