@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Website
+    url: https://leansmtp.com
+    about: Overview of the plugin, its transports, and how it's configured.
+  - name: Contributing guide
+    url: https://github.com/pjaudiomv/lean-smtp/blob/main/.github/CONTRIBUTING.md
+    about: Local dev setup, coding standards, testing, and how to add a mail provider.
+  - name: Report a security vulnerability
+    url: https://github.com/pjaudiomv/lean-smtp/security/advisories/new
+    about: Please report vulnerabilities privately, not as public issues.

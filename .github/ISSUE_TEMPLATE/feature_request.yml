@@ -1,0 +1,38 @@
+name: Feature Request
+description: Suggest an idea or improvement
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have an idea to make Lean SMTP better? We'd love to hear it.
+
+        Lean SMTP is deliberately small, so features earn their place by being broadly useful without adding weight or upsells. New API transports in particular have a high bar: every supported provider already offers plain SMTP, so an API transport only makes sense where outbound mail ports are commonly blocked.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the use case or pain point. "I'm frustrated when..." is a great start.
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What would you like to see? How should it work?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you've considered
+      description: Any other approaches you thought about, or workarounds you're currently using (e.g. the SMTP transport)?
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Links, provider API docs, examples from other tools, etc.

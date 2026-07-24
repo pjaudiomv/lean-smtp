@@ -1,0 +1,81 @@
+name: Bug Report
+description: Something isn't working correctly
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please fill out as much as you can — it helps us fix things faster.
+
+        **Do not paste passwords, API keys, or other secrets.** Redact them.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the bug.
+      placeholder: When I send mail via X, Y happens instead of Z.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Set Mailer to ...
+        2. Send a test email / trigger wp_mail() from ...
+        3. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      placeholder: What should have happened?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: mailer
+    attributes:
+      label: Mailer / transport
+      options:
+        - SMTP
+        - Amazon SES (API)
+        - Mailgun (API)
+        - Resend (API)
+        - Not sure / N/A
+    validations:
+      required: true
+
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Lean SMTP version
+      placeholder: e.g. 0.2.0
+    validations:
+      required: true
+
+  - type: input
+    id: wp-version
+    attributes:
+      label: WordPress version
+      placeholder: e.g. 6.7
+    validations:
+      required: true
+
+  - type: input
+    id: php-version
+    attributes:
+      label: PHP version
+      placeholder: e.g. 8.3
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Failure notice text, the send-log row, relevant `wp lean-smtp status` output (secrets redacted), server/host details, etc.

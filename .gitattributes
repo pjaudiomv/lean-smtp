@@ -8,7 +8,6 @@
 /.idea              export-ignore
 /.phpcs.xml         export-ignore
 /CLAUDE.md          export-ignore
-/CONTRIBUTING.md    export-ignore
 /Dockerfile         export-ignore
 /Dockerfile.test    export-ignore
 /Makefile           export-ignore

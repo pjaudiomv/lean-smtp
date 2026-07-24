@@ -65,7 +65,7 @@ docker compose exec wordpress wp --allow-root lean-smtp status
 
 To exercise the plugin end-to-end locally, set **Mailer: SMTP · Host: `mailpit` · Port: `1025` · Encryption: None · Auth: off** and watch messages arrive in Mailpit.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow, coding standards, and how to add a mail provider.
+See [CONTRIBUTING.md](.github/CONTRIBUTING.md) for the full workflow, coding standards, and how to add a mail provider.
 
 ## License
 
