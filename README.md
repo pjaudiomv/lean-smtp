@@ -6,6 +6,7 @@
 
 [![pull-request](https://github.com/pjaudiomv/lean-smtp/actions/workflows/pull-requests.yml/badge.svg)](https://github.com/pjaudiomv/lean-smtp/actions/workflows/pull-requests.yml)
 [![License: GPL v2](https://img.shields.io/badge/License-GPLv2-blue.svg)](LICENSE)
+[![Website](https://img.shields.io/badge/Website-leansmtp.com-4F46E5.svg)](https://leansmtp.com)
 
 A small WordPress plugin that routes `wp_mail()` through an **SMTP** server or the **Amazon SES**, **Mailgun**, or **Resend** API — the essentials of wp-mail-smtp, without the bulk.
 

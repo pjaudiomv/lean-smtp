@@ -14,6 +14,8 @@ Route wp_mail() through SMTP or the Amazon SES, Mailgun, or Resend API — with 
 
 Lean SMTP makes WordPress send its mail through a real mail service instead of the host's default PHP mail, which improves deliverability. It is deliberately small: a handful of transports, a handful of settings, no upsells.
 
+Website: https://leansmtp.com
+
 Every provider below also offers plain SMTP, so the SMTP transport alone covers all of them. The API transports exist for hosts that block outbound mail ports (25/465/587), which is common on shared hosting and some managed platforms.
 
 * **SMTP** — any host/port with TLS, SSL, or no encryption, optional username/password.
