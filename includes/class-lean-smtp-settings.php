@@ -20,9 +20,15 @@ class Lean_SMTP_Settings {
 	const PAGE  = 'lean-smtp';
 	const GROUP = 'lean-smtp-group';
 
+	/**
+	 * Hook suffix of our own settings screen, so assets load nowhere else.
+	 */
+	private static string $hook_suffix = '';
+
 	public static function init(): void {
 		add_action( 'admin_menu', [ static::class, 'admin_menu' ] );
 		add_action( 'admin_init', [ static::class, 'register_settings' ] );
+		add_action( 'admin_enqueue_scripts', [ static::class, 'enqueue_assets' ] );
 		add_action( 'admin_post_lean_smtp_test', [ static::class, 'handle_test' ] );
 		add_action( 'admin_post_lean_smtp_clear_log', [ static::class, 'handle_clear_log' ] );
 		add_filter( 'plugin_action_links_' . plugin_basename( LEAN_SMTP_FILE ), [ static::class, 'settings_link' ] );
@@ -35,7 +41,7 @@ class Lean_SMTP_Settings {
 	}
 
 	public static function admin_menu(): void {
-		add_options_page(
+		self::$hook_suffix = (string) add_options_page(
 			__( 'Lean SMTP Settings', 'lean-smtp' ),
 			__( 'Lean SMTP', 'lean-smtp' ),
 			'manage_options',
@@ -48,51 +54,79 @@ class Lean_SMTP_Settings {
 	// Registration & sanitizing
 	// -------------------------------------------------------------------------
 
-	public static function register_settings(): void {
-		self::register( Lean_SMTP_Mailer::OPTION_MAILER, [ static::class, 'sanitize_mailer' ] );
-		self::register( Lean_SMTP_Mailer::OPTION_FROM_EMAIL, 'sanitize_email' );
-		self::register( Lean_SMTP_Mailer::OPTION_FROM_NAME, 'sanitize_text_field' );
-		self::register( Lean_SMTP_Mailer::OPTION_FORCE_FROM_MAIL, 'absint' );
-		self::register( Lean_SMTP_Mailer::OPTION_FORCE_FROM_NAME, 'absint' );
+	/**
+	 * Every setting this page owns, mapped to the sanitizer its submitted value
+	 * has to pass through.
+	 *
+	 * @return array<string, callable>
+	 */
+	private static function sanitizers(): array {
+		return [
+			Lean_SMTP_Mailer::OPTION_MAILER          => [ static::class, 'sanitize_mailer' ],
+			Lean_SMTP_Mailer::OPTION_FROM_EMAIL      => 'sanitize_email',
+			Lean_SMTP_Mailer::OPTION_FROM_NAME       => 'sanitize_text_field',
+			Lean_SMTP_Mailer::OPTION_FORCE_FROM_MAIL => 'absint',
+			Lean_SMTP_Mailer::OPTION_FORCE_FROM_NAME => 'absint',
 
-		self::register( Lean_SMTP_Mailer::OPTION_SMTP_HOST, 'sanitize_text_field' );
-		self::register( Lean_SMTP_Mailer::OPTION_SMTP_PORT, 'absint' );
-		self::register( Lean_SMTP_Mailer::OPTION_SMTP_ENCRYPTION, [ static::class, 'sanitize_encryption' ] );
-		self::register( Lean_SMTP_Mailer::OPTION_SMTP_AUTH, 'absint' );
-		self::register( Lean_SMTP_Mailer::OPTION_SMTP_USERNAME, 'sanitize_text_field' );
-		self::register( Lean_SMTP_Mailer::OPTION_SMTP_PASSWORD, [ static::class, 'sanitize_smtp_password' ] );
+			Lean_SMTP_Mailer::OPTION_SMTP_HOST       => 'sanitize_text_field',
+			Lean_SMTP_Mailer::OPTION_SMTP_PORT       => 'absint',
+			Lean_SMTP_Mailer::OPTION_SMTP_ENCRYPTION => [ static::class, 'sanitize_encryption' ],
+			Lean_SMTP_Mailer::OPTION_SMTP_AUTH       => 'absint',
+			Lean_SMTP_Mailer::OPTION_SMTP_USERNAME   => 'sanitize_text_field',
+			Lean_SMTP_Mailer::OPTION_SMTP_PASSWORD   => [ static::class, 'sanitize_smtp_password' ],
 
-		self::register( Lean_SMTP_SES::OPTION_REGION, 'sanitize_text_field' );
-		self::register( Lean_SMTP_SES::OPTION_ACCESS_KEY, 'sanitize_text_field' );
-		self::register( Lean_SMTP_SES::OPTION_SECRET_KEY, [ static::class, 'sanitize_ses_secret' ] );
+			Lean_SMTP_SES::OPTION_REGION             => 'sanitize_text_field',
+			Lean_SMTP_SES::OPTION_ACCESS_KEY         => 'sanitize_text_field',
+			Lean_SMTP_SES::OPTION_SECRET_KEY         => [ static::class, 'sanitize_ses_secret' ],
 
-		self::register( Lean_SMTP_Mailgun::OPTION_DOMAIN, 'sanitize_text_field' );
-		self::register( Lean_SMTP_Mailgun::OPTION_REGION, [ static::class, 'sanitize_mailgun_region' ] );
-		self::register( Lean_SMTP_Mailgun::OPTION_API_KEY, [ static::class, 'sanitize_mailgun_key' ] );
+			Lean_SMTP_Mailgun::OPTION_DOMAIN         => 'sanitize_text_field',
+			Lean_SMTP_Mailgun::OPTION_REGION         => [ static::class, 'sanitize_mailgun_region' ],
+			Lean_SMTP_Mailgun::OPTION_API_KEY        => [ static::class, 'sanitize_mailgun_key' ],
 
-		self::register( Lean_SMTP_Resend::OPTION_API_KEY, [ static::class, 'sanitize_resend_key' ] );
+			Lean_SMTP_Resend::OPTION_API_KEY         => [ static::class, 'sanitize_resend_key' ],
 
-		self::register( Lean_SMTP_Logger::OPTION_ENABLED, 'absint' );
-	}
-
-	private static function register( string $option, callable $callback ): void {
-		register_setting( self::GROUP, $option, [ 'sanitize_callback' => self::guard( $option, $callback ) ] );
+			Lean_SMTP_Logger::OPTION_ENABLED         => 'absint',
+		];
 	}
 
 	/**
-	 * Wrap a sanitize callback so a constant-backed setting ignores submissions.
+	 * Register every setting with its sanitizer, then layer the constant guard
+	 * on top of that sanitizer at a later priority.
+	 */
+	public static function register_settings(): void {
+		foreach ( self::sanitizers() as $option => $sanitize_callback ) {
+			register_setting(
+				self::GROUP,
+				$option,
+				[
+					// The integer settings are exactly the absint ones: ports and checkboxes.
+					'type'              => 'absint' === $sanitize_callback ? 'integer' : 'string',
+					'sanitize_callback' => $sanitize_callback,
+				]
+			);
+
+			// Runs after the sanitizer above, and discards its result for any
+			// setting pinned in wp-config.php.
+			add_filter( "sanitize_option_{$option}", [ static::class, 'guard_constant' ], 20, 2 );
+		}
+	}
+
+	/**
+	 * Keep a constant-backed setting immune to form submissions.
 	 *
 	 * Necessary as well as tidy: core's options.php calls update_option() with
-	 * null for any registered option missing from the POST, so a disabled field
-	 * would otherwise wipe the value saved underneath the constant.
+	 * null for any registered option missing from the POST, so rendering the field
+	 * disabled would on its own wipe the value saved underneath the constant.
+	 *
+	 * @param mixed  $value  The sanitized value.
+	 * @param string $option The option being saved.
+	 * @return mixed The value to store.
 	 */
-	private static function guard( string $option, callable $callback ): callable {
-		return static function ( $value ) use ( $option, $callback ) {
-			if ( Lean_SMTP_Config::is_constant( $option ) ) {
-				return get_option( $option, '' );
-			}
-			return call_user_func( $callback, $value );
-		};
+	public static function guard_constant( $value, string $option = '' ) {
+		if ( '' !== $option && Lean_SMTP_Config::is_constant( $option ) ) {
+			return get_option( $option, '' );
+		}
+		return $value;
 	}
 
 	public static function sanitize_mailer( $value ): string {
@@ -309,42 +343,27 @@ class Lean_SMTP_Settings {
 	}
 
 	/**
-	 * Scoped styling for this screen. Inlined to keep the plugin asset-free;
-	 * every rule is namespaced under .lsmtp-wrap.
+	 * Stylesheet and script for this screen only. The script's PHP-side inputs
+	 * (the mailer option name and the transport labels) are handed over with
+	 * wp_localize_script() rather than printed inline.
+	 *
+	 * @param string $hook_suffix The current admin page.
 	 */
-	private static function admin_css(): void {
-		?>
-		<style>
-			.lsmtp-wrap { max-width: 900px; }
-			.lsmtp-header { display: flex; align-items: center; gap: 14px; margin: 6px 0 20px; }
-			.lsmtp-logo svg { display: block; width: 42px; height: 42px; }
-			.lsmtp-title h1 { margin: 0; padding: 0; font-size: 22px; line-height: 1.2; }
-			.lsmtp-title p { margin: 2px 0 0; font-size: 13px; color: #646970; }
-			.lsmtp-status { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; font-size: 12px; color: #1d2327; background: #fff; border: 1px solid #dcdcde; border-radius: 999px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
-			.lsmtp-status .lsmtp-dot { width: 8px; height: 8px; border-radius: 50%; background: #00a32a; box-shadow: 0 0 0 3px rgba(0,163,42,.16); }
-			.lsmtp-card { margin: 0 0 18px; padding: 4px 24px 14px; background: #fff; border: 1px solid #dcdcde; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
-			.lsmtp-card > h2 { display: flex; align-items: center; gap: 9px; margin: 0 0 2px; padding: 16px 0 0; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: #1d2327; }
-			.lsmtp-card > h2::before { content: ""; width: 4px; height: 15px; border-radius: 2px; background: linear-gradient(180deg, #4f46e5, #312a9e); }
-			.lsmtp-card > .description { margin: 4px 0 0; }
-			.lsmtp-card .form-table { margin-top: 6px; }
-			.lsmtp-card .form-table th { padding-left: 0; font-weight: 600; }
-			.lsmtp-transports { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 14px 0 2px; }
-			.lsmtp-transport { position: relative; display: flex; flex-direction: column; gap: 3px; padding: 12px 14px; background: #fff; border: 1.5px solid #dcdcde; border-radius: 8px; cursor: pointer; transition: border-color .15s, box-shadow .15s, background .15s; }
-			.lsmtp-transport:hover { border-color: #a7aaad; }
-			.lsmtp-transport input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
-			.lsmtp-transport-tag { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: #787c82; }
-			.lsmtp-transport-name { font-size: 14px; font-weight: 600; color: #1d2327; }
-			.lsmtp-transport.is-active { border-color: #4f46e5; background: #f6f6ff; box-shadow: inset 0 0 0 1px #4f46e5; }
-			.lsmtp-transport.is-active .lsmtp-transport-tag { color: #4f46e5; }
-			.lsmtp-transport:focus-within { border-color: #4f46e5; box-shadow: 0 0 0 2px rgba(79,70,229,.35); }
-			.lsmtp-transport:has(input:disabled) { cursor: default; opacity: .65; }
-			@media (max-width: 782px) { .lsmtp-transports { grid-template-columns: 1fr 1fr; } }
-			.lsmtp-badge { display: inline-flex; align-items: center; gap: 5px; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 1.7; }
-			.lsmtp-badge.sent { color: #00794e; background: #edf7f0; }
-			.lsmtp-badge.failed { color: #b32d2e; background: #fbeaea; }
-			.lsmtp-log { max-width: 900px; }
-		</style>
-		<?php
+	public static function enqueue_assets( string $hook_suffix ): void {
+		if ( '' === self::$hook_suffix || $hook_suffix !== self::$hook_suffix ) {
+			return;
+		}
+
+		wp_enqueue_style( 'lean-smtp-settings', LEAN_SMTP_URL . 'css/settings.css', [], LEAN_SMTP_VERSION );
+		wp_enqueue_script( 'lean-smtp-settings', LEAN_SMTP_URL . 'js/settings.js', [], LEAN_SMTP_VERSION, true );
+		wp_localize_script(
+			'lean-smtp-settings',
+			'leanSmtpSettings',
+			[
+				'option' => Lean_SMTP_Mailer::OPTION_MAILER,
+				'labels' => self::mailer_labels(),
+			]
+		);
 	}
 
 	/**
@@ -406,7 +425,6 @@ class Lean_SMTP_Settings {
 	}
 
 	public static function settings_page(): void {
-		self::admin_css();
 		$active_mailer = Lean_SMTP_Config::get_string( Lean_SMTP_Mailer::OPTION_MAILER, Lean_SMTP_Mailer::MAILER_SMTP );
 		?>
 		<div class="wrap lsmtp-wrap">
@@ -443,7 +461,7 @@ class Lean_SMTP_Settings {
 									'description' => __( 'The address messages are sent from. Your provider must have this address or its domain verified.', 'lean-smtp' ),
 								]
 							);
-							echo '<div style="margin-top:6px;">';
+							echo '<div class="lsmtp-force">';
 							self::checkbox_field( Lean_SMTP_Mailer::OPTION_FORCE_FROM_MAIL, __( 'Force From Email (override the address other plugins set)', 'lean-smtp' ) );
 							echo '</div>';
 							?>
@@ -457,7 +475,7 @@ class Lean_SMTP_Settings {
 								Lean_SMTP_Mailer::OPTION_FROM_NAME,
 								[ 'placeholder' => get_bloginfo( 'name' ) ]
 							);
-							echo '<div style="margin-top:6px;">';
+							echo '<div class="lsmtp-force">';
 							self::checkbox_field( Lean_SMTP_Mailer::OPTION_FORCE_FROM_NAME, __( 'Force From Name (override the name other plugins set)', 'lean-smtp' ) );
 							echo '</div>';
 							?>
@@ -635,30 +653,6 @@ class Lean_SMTP_Settings {
 			<?php self::render_test_form(); ?>
 			<?php self::render_log(); ?>
 		</div>
-
-		<script>
-			( function () {
-				var name   = <?php echo wp_json_encode( Lean_SMTP_Mailer::OPTION_MAILER ); ?>;
-				var labels = <?php echo wp_json_encode( self::mailer_labels() ); ?>;
-				var radios = document.getElementsByName( name );
-				if ( ! radios.length ) { return; }
-				var statusName = document.getElementById( 'lsmtp-status-name' );
-				function sync() {
-					var value = '';
-					Array.prototype.forEach.call( radios, function ( r ) { if ( r.checked ) { value = r.value; } } );
-					document.querySelectorAll( '.lsmtp-section' ).forEach( function ( el ) {
-						el.style.display = ( el.getAttribute( 'data-mailer' ) === value ) ? '' : 'none';
-					} );
-					document.querySelectorAll( '.lsmtp-transport' ).forEach( function ( el ) {
-						var input = el.querySelector( 'input' );
-						el.classList.toggle( 'is-active', !! ( input && input.checked ) );
-					} );
-					if ( statusName && labels[ value ] ) { statusName.textContent = labels[ value ]; }
-				}
-				Array.prototype.forEach.call( radios, function ( r ) { r.addEventListener( 'change', sync ); } );
-				sync();
-			}() );
-		</script>
 		<?php
 	}
 
@@ -667,7 +661,8 @@ class Lean_SMTP_Settings {
 		if ( ! isset( $_GET['lsmtp_test'] ) ) {
 			return;
 		}
-		if ( 'ok' === $_GET['lsmtp_test'] ) {
+		$result = sanitize_key( wp_unslash( (string) $_GET['lsmtp_test'] ) );
+		if ( 'ok' === $result ) {
 			echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__( 'Test email sent successfully.', 'lean-smtp' ) . '</p></div>';
 		} else {
 			$msg = isset( $_GET['lsmtp_msg'] ) ? sanitize_text_field( wp_unslash( (string) $_GET['lsmtp_msg'] ) ) : '';
@@ -684,14 +679,14 @@ class Lean_SMTP_Settings {
 		<div class="lsmtp-card">
 			<h2><?php esc_html_e( 'Send a Test Email', 'lean-smtp' ); ?></h2>
 			<p class="description"><?php esc_html_e( 'Save your settings first, then send a test with the current configuration.', 'lean-smtp' ); ?></p>
-			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="margin-top:8px;">
+			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" class="lsmtp-test-form">
 				<input type="hidden" name="action" value="lean_smtp_test" />
 				<?php wp_nonce_field( 'lean_smtp_test' ); ?>
 				<input type="email" name="lean_smtp_test_to" class="regular-text" required
 					value="<?php echo esc_attr( (string) get_option( 'admin_email' ) ); ?>" />
 				<?php submit_button( __( 'Send Test Email', 'lean-smtp' ), 'secondary', 'submit', false ); ?>
 			</form>
-			<p class="description" style="margin-top:8px;"><?php esc_html_e( 'On the command line: wp lean-smtp test, or wp lean-smtp status to see the configuration in force.', 'lean-smtp' ); ?></p>
+			<p class="description lsmtp-test-note"><?php esc_html_e( 'On the command line: wp lean-smtp test, or wp lean-smtp status to see the configuration in force.', 'lean-smtp' ); ?></p>
 		</div>
 		<?php
 	}
@@ -736,7 +731,7 @@ class Lean_SMTP_Settings {
 					<?php endforeach; ?>
 					</tbody>
 				</table>
-				<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="margin-top:12px;">
+				<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" class="lsmtp-clear-form">
 					<input type="hidden" name="action" value="lean_smtp_clear_log" />
 					<?php wp_nonce_field( 'lean_smtp_clear_log' ); ?>
 					<?php submit_button( __( 'Clear Log', 'lean-smtp' ), 'delete', 'submit', false ); ?>

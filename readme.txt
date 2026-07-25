@@ -4,7 +4,7 @@ Tags: smtp, mail, email, ses, wp_mail
 Requires at least: 6.0
 Tested up to: 7.0
 Requires PHP: 8.1
-Stable tag: 0.2.0
+Stable tag: 0.2.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -79,6 +79,10 @@ The SMTP transport connects only to the host you configure and bundles no third-
 5. Send a test email, and review the optional send log of recent attempts.
 
 == Changelog ==
+
+= 0.2.1 =
+* The settings screen's CSS and JavaScript are now enqueued as files on that screen only, instead of being printed inline.
+* Each setting is now registered with its own named sanitize callback, with the wp-config.php constant guard applied as a separate filter on top.
 
 = 0.2.0 =
 * Added a Mailgun transport (US and EU regions), sending the assembled message as MIME.

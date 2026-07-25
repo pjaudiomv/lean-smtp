@@ -1,0 +1,34 @@
+/* Settings → Lean SMTP. Every rule is namespaced under .lsmtp-wrap. */
+
+.lsmtp-wrap { max-width: 900px; }
+.lsmtp-header { display: flex; align-items: center; gap: 14px; margin: 6px 0 20px; }
+.lsmtp-logo svg { display: block; width: 42px; height: 42px; }
+.lsmtp-title h1 { margin: 0; padding: 0; font-size: 22px; line-height: 1.2; }
+.lsmtp-title p { margin: 2px 0 0; font-size: 13px; color: #646970; }
+.lsmtp-status { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; font-size: 12px; color: #1d2327; background: #fff; border: 1px solid #dcdcde; border-radius: 999px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+.lsmtp-status .lsmtp-dot { width: 8px; height: 8px; border-radius: 50%; background: #00a32a; box-shadow: 0 0 0 3px rgba(0,163,42,.16); }
+.lsmtp-card { margin: 0 0 18px; padding: 4px 24px 14px; background: #fff; border: 1px solid #dcdcde; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+.lsmtp-card > h2 { display: flex; align-items: center; gap: 9px; margin: 0 0 2px; padding: 16px 0 0; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: #1d2327; }
+.lsmtp-card > h2::before { content: ""; width: 4px; height: 15px; border-radius: 2px; background: linear-gradient(180deg, #4f46e5, #312a9e); }
+.lsmtp-card > .description { margin: 4px 0 0; }
+.lsmtp-card .form-table { margin-top: 6px; }
+.lsmtp-card .form-table th { padding-left: 0; font-weight: 600; }
+.lsmtp-transports { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 14px 0 2px; }
+.lsmtp-transport { position: relative; display: flex; flex-direction: column; gap: 3px; padding: 12px 14px; background: #fff; border: 1.5px solid #dcdcde; border-radius: 8px; cursor: pointer; transition: border-color .15s, box-shadow .15s, background .15s; }
+.lsmtp-transport:hover { border-color: #a7aaad; }
+.lsmtp-transport input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.lsmtp-transport-tag { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: #787c82; }
+.lsmtp-transport-name { font-size: 14px; font-weight: 600; color: #1d2327; }
+.lsmtp-transport.is-active { border-color: #4f46e5; background: #f6f6ff; box-shadow: inset 0 0 0 1px #4f46e5; }
+.lsmtp-transport.is-active .lsmtp-transport-tag { color: #4f46e5; }
+.lsmtp-transport:focus-within { border-color: #4f46e5; box-shadow: 0 0 0 2px rgba(79,70,229,.35); }
+.lsmtp-transport:has(input:disabled) { cursor: default; opacity: .65; }
+@media (max-width: 782px) { .lsmtp-transports { grid-template-columns: 1fr 1fr; } }
+.lsmtp-badge { display: inline-flex; align-items: center; gap: 5px; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 1.7; }
+.lsmtp-badge.sent { color: #00794e; background: #edf7f0; }
+.lsmtp-badge.failed { color: #b32d2e; background: #fbeaea; }
+.lsmtp-log { max-width: 900px; }
+.lsmtp-force { margin-top: 6px; }
+.lsmtp-test-form { margin-top: 8px; }
+.lsmtp-test-note { margin-top: 8px; }
+.lsmtp-clear-form { margin-top: 12px; }

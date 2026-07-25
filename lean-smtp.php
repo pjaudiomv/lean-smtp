@@ -3,7 +3,7 @@
  * Plugin Name: Lean SMTP
  * Plugin URI: https://github.com/pjaudiomv/lean-smtp
  * Description: Routes wp_mail() through an SMTP server or the Amazon SES, Mailgun, or Resend API, with From identity control, wp-config.php overrides, failure alerts, WP-CLI commands, a test-email button, and optional send logging.
- * Version: 0.2.0
+ * Version: 0.2.1
  * Author: pjaudiomv
  * License: GPL v2 or later
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -14,7 +14,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'LEAN_SMTP_VERSION', '0.2.0' );
+define( 'LEAN_SMTP_VERSION', '0.2.1' );
 define( 'LEAN_SMTP_FILE', __FILE__ );
 define( 'LEAN_SMTP_DIR', plugin_dir_path( __FILE__ ) );
 define( 'LEAN_SMTP_URL', plugin_dir_url( __FILE__ ) );

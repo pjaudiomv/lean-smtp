@@ -72,9 +72,30 @@ class Test_Lean_SMTP_Config extends WP_UnitTestCase {
 		update_option( Lean_SMTP_Mailer::OPTION_SMTP_USERNAME, 'database-user' );
 		Lean_SMTP_Settings::register_settings();
 
-		$sanitized = apply_filters( 'sanitize_option_' . Lean_SMTP_Mailer::OPTION_SMTP_USERNAME, 'submitted-user' );
+		// Core's sanitize_option() passes the option name alongside the value.
+		$sanitized = apply_filters(
+			'sanitize_option_' . Lean_SMTP_Mailer::OPTION_SMTP_USERNAME,
+			'submitted-user',
+			Lean_SMTP_Mailer::OPTION_SMTP_USERNAME,
+			'submitted-user'
+		);
 
 		$this->assertSame( 'database-user', $sanitized );
+	}
+
+	public function test_unpinned_setting_is_sanitized_on_save() {
+		// The registered callback dispatches on the option name, so a stale map
+		// would silently stop sanitizing a setting.
+		Lean_SMTP_Settings::register_settings();
+
+		$sanitized = apply_filters(
+			'sanitize_option_' . Lean_SMTP_Mailer::OPTION_MAILER,
+			'not-a-transport',
+			Lean_SMTP_Mailer::OPTION_MAILER,
+			'not-a-transport'
+		);
+
+		$this->assertSame( Lean_SMTP_Mailer::MAILER_SMTP, $sanitized );
 	}
 
 	public function test_smtp_transport_uses_pinned_credentials() {
