@@ -102,6 +102,20 @@ Keep the shared assembly shared:
 5. Never let a `Bcc` header reach the wire — carry those recipients in the
    provider's envelope (see `strip_bcc_header()`).
 
+### Changing the send-log table
+
+Edit the `CREATE TABLE` in `Lean_SMTP_Logger::create_table()` **and** bump
+`Lean_SMTP_Logger::DB_VERSION` in the same change. `register_activation_hook()`
+does not fire when a plugin is updated, so without the bump a new column never
+reaches a site that already has the table, and every insert naming it fails.
+`maybe_upgrade()` re-runs `dbDelta` when the stored version differs.
+
+If the new column holds any part of the message, it must be behind its own
+opt-in setting, off by default — `lean_smtp_log_headers` and
+`lean_smtp_log_body` are the precedent. A stored body contains password-reset
+links and personal data; the send log's default is to record *that* mail was
+sent, not what was in it.
+
 ## Releasing
 
 Maintainers cut releases by pushing a version tag. Three things must always

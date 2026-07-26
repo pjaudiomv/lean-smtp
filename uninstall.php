@@ -17,6 +17,7 @@ $lean_smtp_options = [
 	'lean_smtp_from_name',
 	'lean_smtp_force_from_email',
 	'lean_smtp_force_from_name',
+	'lean_smtp_reply_to',
 	'lean_smtp_smtp_host',
 	'lean_smtp_smtp_port',
 	'lean_smtp_smtp_encryption',
@@ -31,6 +32,9 @@ $lean_smtp_options = [
 	'lean_smtp_mailgun_api_key',
 	'lean_smtp_resend_api_key',
 	'lean_smtp_logging_enabled',
+	'lean_smtp_log_headers',
+	'lean_smtp_log_body',
+	'lean_smtp_db_version',
 	'lean_smtp_last_failure',
 ];
 

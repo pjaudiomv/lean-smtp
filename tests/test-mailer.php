@@ -57,6 +57,147 @@ class Test_Lean_SMTP_Mailer extends WP_UnitTestCase {
 	}
 
 	// -------------------------------------------------------------------------
+	// Reply-To
+	// -------------------------------------------------------------------------
+
+	private function phpmailer() {
+		require_once ABSPATH . WPINC . '/PHPMailer/PHPMailer.php';
+		require_once ABSPATH . WPINC . '/PHPMailer/Exception.php';
+		return new PHPMailer\PHPMailer\PHPMailer( true );
+	}
+
+	/**
+	 * PHPMailer hands back [ address, name ] pairs; the addresses alone are what
+	 * these tests care about.
+	 *
+	 * @param PHPMailer\PHPMailer\PHPMailer $phpmailer
+	 * @return string[]
+	 */
+	private function reply_to_addresses( $phpmailer ): array {
+		return array_column( $phpmailer->getReplyToAddresses(), 0 );
+	}
+
+	public function test_reply_to_fills_in_when_the_message_sets_none() {
+		update_option( Lean_SMTP_Mailer::OPTION_REPLY_TO, 'help@example.org' );
+
+		$phpmailer = $this->phpmailer();
+		Lean_SMTP_Mailer::apply_reply_to( $phpmailer );
+
+		$this->assertSame( [ 'help@example.org' ], $this->reply_to_addresses( $phpmailer ) );
+	}
+
+	public function test_reply_to_leaves_one_the_message_chose_alone() {
+		// A Reply-To in the message's own headers was picked for that message;
+		// this setting is only a site-wide default.
+		update_option( Lean_SMTP_Mailer::OPTION_REPLY_TO, 'help@example.org' );
+
+		$phpmailer = $this->phpmailer();
+		$phpmailer->addReplyTo( 'sales@example.org' );
+		Lean_SMTP_Mailer::apply_reply_to( $phpmailer );
+
+		$this->assertSame( [ 'sales@example.org' ], $this->reply_to_addresses( $phpmailer ) );
+	}
+
+	public function test_no_reply_to_is_added_when_the_setting_is_empty() {
+		$phpmailer = $this->phpmailer();
+		Lean_SMTP_Mailer::apply_reply_to( $phpmailer );
+
+		$this->assertSame( [], $this->reply_to_addresses( $phpmailer ) );
+	}
+
+	public function test_reply_to_reaches_an_api_send() {
+		// One phpmailer_init handler has to serve both paths; the API path
+		// re-fires that hook, so this proves the shared handler is enough.
+		$this->configure_ses();
+		update_option( Lean_SMTP_Mailer::OPTION_REPLY_TO, 'help@example.org' );
+		add_action( 'phpmailer_init', [ 'Lean_SMTP_Mailer', 'apply_reply_to' ] );
+
+		$captured = [];
+		add_filter(
+			'pre_http_request',
+			function ( $preempt, $args ) use ( &$captured ) {
+				$captured['args'] = $args;
+				return [
+					'response' => [
+						'code'    => 200,
+						'message' => 'OK',
+					],
+					'body'     => '{"MessageId":"x"}',
+				];
+			},
+			10,
+			3
+		);
+
+		Lean_SMTP_Mailer::send_via_api(
+			null,
+			[
+				'to'          => 'rcpt@example.com',
+				'subject'     => 'Hello',
+				'message'     => 'Body',
+				'headers'     => '',
+				'attachments' => [],
+			]
+		);
+
+		$body = json_decode( $captured['args']['body'], true );
+		$raw  = base64_decode( $body['Content']['Raw']['Data'] );
+
+		$this->assertStringContainsString( 'Reply-To: help@example.org', $raw );
+	}
+
+	// -------------------------------------------------------------------------
+	// Offline path
+	// -------------------------------------------------------------------------
+
+	public function test_offline_records_the_message_and_contacts_nothing() {
+		update_option( Lean_SMTP_Mailer::OPTION_MAILER, Lean_SMTP_Mailer::MAILER_OFFLINE );
+		update_option( Lean_SMTP_Logger::OPTION_ENABLED, '1' );
+		update_option( Lean_SMTP_Logger::OPTION_LOG_BODY, '1' );
+		Lean_SMTP_Logger::clear();
+
+		add_filter(
+			'pre_http_request',
+			function () {
+				$this->fail( 'Offline mode must not make an HTTP request.' );
+			}
+		);
+
+		// init() is what decides the path, so exercise it: a real wp_mail() call
+		// has to come back true without anything leaving the site.
+		Lean_SMTP_Mailer::init();
+		$sent = wp_mail( 'rcpt@example.com', 'Order #1234', 'Your order shipped.' );
+
+		$this->assertTrue( $sent );
+
+		$rows = Lean_SMTP_Logger::recent( 5 );
+		$this->assertCount( 1, $rows );
+		$this->assertSame( Lean_SMTP_Logger::STATUS_OFFLINE, $rows[0]->status );
+		$this->assertSame( Lean_SMTP_Mailer::MAILER_OFFLINE, $rows[0]->mailer );
+		$this->assertSame( 'Order #1234', $rows[0]->subject );
+		$this->assertSame( 'Your order shipped.', $rows[0]->body );
+
+		Lean_SMTP_Logger::clear();
+		delete_option( Lean_SMTP_Logger::OPTION_ENABLED );
+		delete_option( Lean_SMTP_Logger::OPTION_LOG_BODY );
+	}
+
+	public function test_offline_is_always_configured_and_never_a_transport() {
+		update_option( Lean_SMTP_Mailer::OPTION_MAILER, Lean_SMTP_Mailer::MAILER_OFFLINE );
+
+		$this->assertTrue( Lean_SMTP_Mailer::is_offline() );
+		$this->assertTrue( Lean_SMTP_Mailer::is_configured() );
+		$this->assertNull( Lean_SMTP_Mailer::transport() );
+	}
+
+	public function test_an_unknown_mailer_falls_back_to_smtp() {
+		update_option( Lean_SMTP_Mailer::OPTION_MAILER, 'sendgrid' );
+
+		$this->assertSame( Lean_SMTP_Mailer::MAILER_SMTP, Lean_SMTP_Mailer::mailer() );
+		$this->assertFalse( Lean_SMTP_Mailer::is_offline() );
+	}
+
+	// -------------------------------------------------------------------------
 	// SES send path
 	// -------------------------------------------------------------------------
 
