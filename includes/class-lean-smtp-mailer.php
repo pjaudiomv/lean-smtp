@@ -12,6 +12,10 @@
  *             and body shape. Every API provider shares that one assembly, so
  *             core's wp_mail() semantics are reproduced in exactly one place.
  *
+ * Plus one non-transport: `offline`, which short-circuits wp_mail() and records
+ * the message without sending it — for staging sites that should behave exactly
+ * like production without mailing real customers.
+ *
  * The From identity (email + name) is applied through the standard
  * `wp_mail_from` / `wp_mail_from_name` filters so it governs both paths and
  * cooperates with other plugins. "Force" makes it win over an address another
@@ -31,6 +35,7 @@ class Lean_SMTP_Mailer {
 	const OPTION_FROM_NAME       = 'lean_smtp_from_name';
 	const OPTION_FORCE_FROM_MAIL = 'lean_smtp_force_from_email';
 	const OPTION_FORCE_FROM_NAME = 'lean_smtp_force_from_name';
+	const OPTION_REPLY_TO        = 'lean_smtp_reply_to';
 
 	const OPTION_SMTP_HOST       = 'lean_smtp_smtp_host';
 	const OPTION_SMTP_PORT       = 'lean_smtp_smtp_port';
@@ -43,10 +48,12 @@ class Lean_SMTP_Mailer {
 	const MAILER_SES     = 'ses';
 	const MAILER_MAILGUN = 'mailgun';
 	const MAILER_RESEND  = 'resend';
+	const MAILER_OFFLINE = 'offline';
 
 	/**
 	 * The API transports, keyed by their mailer slug. SMTP is deliberately
-	 * absent: it isn't a transport class, it's PHPMailer configuration.
+	 * absent: it isn't a transport class, it's PHPMailer configuration. So is
+	 * offline, which sends nothing at all.
 	 *
 	 * @return array<string, string> Slug => class implementing Lean_SMTP_Api_Transport.
 	 */
@@ -59,7 +66,26 @@ class Lean_SMTP_Mailer {
 	}
 
 	/**
-	 * The transport class for the selected mailer, or null when sending over SMTP.
+	 * Every selectable mailer slug — the transports plus the two that aren't
+	 * transport classes.
+	 *
+	 * @return string[]
+	 */
+	public static function mailers(): array {
+		return array_merge(
+			[ self::MAILER_SMTP ],
+			array_keys( self::transports() ),
+			[ self::MAILER_OFFLINE ]
+		);
+	}
+
+	public static function is_valid_mailer( string $slug ): bool {
+		return in_array( $slug, self::mailers(), true );
+	}
+
+	/**
+	 * The transport class for the selected mailer, or null when sending over
+	 * SMTP or not sending at all.
 	 */
 	public static function transport(): ?string {
 		return self::transports()[ self::mailer() ] ?? null;
@@ -68,6 +94,17 @@ class Lean_SMTP_Mailer {
 	public static function init(): void {
 		add_filter( 'wp_mail_from', [ static::class, 'filter_from_email' ] );
 		add_filter( 'wp_mail_from_name', [ static::class, 'filter_from_name' ] );
+
+		// Both send paths raise phpmailer_init — core does it for SMTP, and
+		// send_via_api() re-fires it — so one handler covers Reply-To for both.
+		add_action( 'phpmailer_init', [ static::class, 'apply_reply_to' ] );
+
+		if ( self::is_offline() ) {
+			// Nothing leaves the site; the record is written inline (below)
+			// rather than off wp_mail_succeeded, so it can carry its own status.
+			add_filter( 'pre_wp_mail', [ static::class, 'send_offline' ], 10, 2 );
+			return;
+		}
 
 		if ( null !== self::transport() ) {
 			add_filter( 'pre_wp_mail', [ static::class, 'send_via_api' ], 10, 2 );
@@ -87,7 +124,12 @@ class Lean_SMTP_Mailer {
 
 	public static function mailer(): string {
 		$mailer = Lean_SMTP_Config::get_string( self::OPTION_MAILER, self::MAILER_SMTP );
-		return isset( self::transports()[ $mailer ] ) ? $mailer : self::MAILER_SMTP;
+		return self::is_valid_mailer( $mailer ) ? $mailer : self::MAILER_SMTP;
+	}
+
+	/** Log-only mode: wp_mail() is answered without anything being sent. */
+	public static function is_offline(): bool {
+		return self::MAILER_OFFLINE === self::mailer();
 	}
 
 	public static function from_email(): string {
@@ -96,6 +138,10 @@ class Lean_SMTP_Mailer {
 
 	public static function from_name(): string {
 		return Lean_SMTP_Config::get_string( self::OPTION_FROM_NAME );
+	}
+
+	public static function reply_to(): string {
+		return Lean_SMTP_Config::get_string( self::OPTION_REPLY_TO );
 	}
 
 	private static function force_from_email(): bool {
@@ -112,9 +158,13 @@ class Lean_SMTP_Mailer {
 
 	/**
 	 * Whether the selected mailer has everything it needs to send. SMTP only
-	 * really requires a host; the API transports each answer for themselves.
+	 * really requires a host; the API transports each answer for themselves;
+	 * offline has nothing to configure.
 	 */
 	public static function is_configured(): bool {
+		if ( self::is_offline() ) {
+			return true;
+		}
 		$transport = self::transport();
 		if ( null === $transport ) {
 			return '' !== Lean_SMTP_Config::get_string( self::OPTION_SMTP_HOST );
@@ -163,6 +213,75 @@ class Lean_SMTP_Mailer {
 			return $configured;
 		}
 		return $from_name;
+	}
+
+	/**
+	 * Apply the configured Reply-To, if the message hasn't set one of its own.
+	 *
+	 * There is no core filter for Reply-To the way there is for From, but every
+	 * path ends at a PHPMailer that has just been populated and not yet sent —
+	 * so this one handler serves SMTP and the API transports alike. A Reply-To
+	 * a caller passed in its headers always wins: it was chosen for that
+	 * message, whereas this setting is only a site-wide default.
+	 *
+	 * @param PHPMailer\PHPMailer\PHPMailer $phpmailer
+	 */
+	public static function apply_reply_to( $phpmailer ): void {
+		$reply_to = self::reply_to();
+		if ( '' === $reply_to || ! empty( $phpmailer->getReplyToAddresses() ) ) {
+			return;
+		}
+
+		try {
+			$phpmailer->addReplyTo( $reply_to, self::from_name() );
+		} catch ( PHPMailer\PHPMailer\Exception $e ) {
+			return; // An unusable address is not worth failing the send over.
+		}
+	}
+
+	// -------------------------------------------------------------------------
+	// Offline path (pre_wp_mail short-circuit, nothing sent)
+	// -------------------------------------------------------------------------
+
+	/**
+	 * Record the message and report success without sending it.
+	 *
+	 * wp_mail() is answered `true` and `wp_mail_succeeded` fires, so the site
+	 * behaves exactly as it would in production — a staging WooCommerce still
+	 * marks its emails as sent — while no mail server is ever contacted.
+	 *
+	 * @param null|bool $short_circuit Prior filter value.
+	 * @param array     $atts          to, subject, message, headers, attachments.
+	 */
+	public static function send_offline( $short_circuit, array $atts ): bool {
+		$atts = apply_filters( 'wp_mail', $atts ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Deliberately re-applying a WordPress core mail hook.
+
+		$to      = $atts['to'] ?? '';
+		$subject = (string) ( $atts['subject'] ?? '' );
+
+		if ( ! is_array( $to ) ) {
+			$to = array_map( 'trim', explode( ',', (string) $to ) );
+		}
+
+		Lean_SMTP_Logger::log(
+			self::MAILER_OFFLINE,
+			$to,
+			$subject,
+			Lean_SMTP_Logger::STATUS_OFFLINE,
+			'',
+			$atts
+		);
+
+		$mail_data = [
+			'to'          => $to,
+			'subject'     => $subject,
+			'message'     => $atts['message'] ?? '',
+			'headers'     => $atts['headers'] ?? '',
+			'attachments' => $atts['attachments'] ?? [],
+		];
+		do_action( 'wp_mail_succeeded', $mail_data ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Deliberately re-firing a WordPress core mail hook.
+
+		return true;
 	}
 
 	// -------------------------------------------------------------------------
@@ -228,6 +347,16 @@ class Lean_SMTP_Mailer {
 		if ( ! is_array( $attachments ) ) {
 			$attachments = explode( "\n", str_replace( "\r\n", "\n", $attachments ) );
 		}
+
+		// Snapshot the arguments as they arrived, for the wp_mail_succeeded /
+		// wp_mail_failed payload — header parsing below rewrites $headers.
+		$mail_data = [
+			'to'          => $to,
+			'subject'     => $subject,
+			'message'     => $message,
+			'headers'     => $headers,
+			'attachments' => $attachments,
+		];
 
 		// --- Parse headers into structured pieces (faithful to core). --------
 		$cc          = [];
@@ -325,7 +454,7 @@ class Lean_SMTP_Mailer {
 		try {
 			$phpmailer->setFrom( $from_email, $from_name, false );
 		} catch ( PHPMailer\PHPMailer\Exception $e ) {
-			return self::fail_api( $to, $subject, $e->getMessage() );
+			return self::fail_api( $mail_data, $e->getMessage() );
 		}
 
 		$phpmailer->Subject = $subject;
@@ -407,7 +536,7 @@ class Lean_SMTP_Mailer {
 		// --- Assemble and hand off to the transport --------------------------
 		$transport = self::transport();
 		if ( null === $transport ) {
-			return self::fail_api( $to, $subject, __( 'No API transport is selected.', 'lean-smtp' ) );
+			return self::fail_api( $mail_data, __( 'No API transport is selected.', 'lean-smtp' ) );
 		}
 
 		// preSend() validates the message and builds the MIME body. Transports
@@ -415,28 +544,21 @@ class Lean_SMTP_Mailer {
 		// read the structured properties it has just finalised.
 		try {
 			if ( ! $phpmailer->preSend() ) {
-				return self::fail_api( $to, $subject, $phpmailer->ErrorInfo );
+				return self::fail_api( $mail_data, $phpmailer->ErrorInfo );
 			}
 		} catch ( PHPMailer\PHPMailer\Exception $e ) {
-			return self::fail_api( $to, $subject, $e->getMessage() );
+			return self::fail_api( $mail_data, $e->getMessage() );
 		}
 
 		$result = call_user_func( [ $transport, 'send' ], $phpmailer );
 
 		if ( is_wp_error( $result ) ) {
-			return self::fail_api( $to, $subject, $result->get_error_message() );
+			return self::fail_api( $mail_data, $result->get_error_message() );
 		}
 
 		// Log through the same wp_mail_succeeded hook the SMTP path uses, so a
 		// send is recorded exactly once. Core doesn't fire this when pre_wp_mail
 		// short-circuits, so we fire it ourselves (also notifies other plugins).
-		$mail_data = [
-			'to'          => $to,
-			'subject'     => $subject,
-			'message'     => $message,
-			'headers'     => $headers,
-			'attachments' => $attachments,
-		];
 		do_action( 'wp_mail_succeeded', $mail_data ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Deliberately re-firing a WordPress core mail hook.
 		return true;
 	}
@@ -446,18 +568,14 @@ class Lean_SMTP_Mailer {
 	 * listen on — and report failure to wp_mail(). Logging happens via that hook,
 	 * not here, so a failed send is never recorded twice.
 	 *
-	 * @param string[] $to
+	 * The error carries the whole message, as core's wp_mail() does on a
+	 * PHPMailer exception, so a listener sees the same payload either way.
+	 *
+	 * @param array $mail_data to, subject, message, headers, attachments.
 	 */
-	private static function fail_api( array $to, string $subject, string $error ): bool {
+	private static function fail_api( array $mail_data, string $error ): bool {
 		$mail_error = new WP_Error();
-		$mail_error->add(
-			'wp_mail_failed',
-			$error,
-			[
-				'to'      => $to,
-				'subject' => $subject,
-			]
-		);
+		$mail_error->add( 'wp_mail_failed', $error, $mail_data );
 		do_action( 'wp_mail_failed', $mail_error ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Deliberately re-firing a WordPress core mail hook.
 
 		return false;
@@ -468,6 +586,10 @@ class Lean_SMTP_Mailer {
 	// -------------------------------------------------------------------------
 
 	/**
+	 * The hook payload is core's own — to, subject, message, headers and
+	 * attachments — so the logger can record the message itself when the site
+	 * has opted into that, without either send path having to assemble it.
+	 *
 	 * @param array $mail_data to, subject, message, headers, attachments.
 	 */
 	public static function log_success( array $mail_data ): void {
@@ -475,18 +597,23 @@ class Lean_SMTP_Mailer {
 			self::mailer(),
 			$mail_data['to'] ?? '',
 			(string) ( $mail_data['subject'] ?? '' ),
-			true
+			Lean_SMTP_Logger::STATUS_SENT,
+			'',
+			$mail_data
 		);
 	}
 
 	public static function log_failure( WP_Error $error ): void {
 		$data = $error->get_error_data();
+		$data = is_array( $data ) ? $data : [];
+
 		Lean_SMTP_Logger::log(
 			self::mailer(),
-			is_array( $data ) ? ( $data['to'] ?? '' ) : '',
-			is_array( $data ) ? (string) ( $data['subject'] ?? '' ) : '',
-			false,
-			$error->get_error_message()
+			$data['to'] ?? '',
+			(string) ( $data['subject'] ?? '' ),
+			Lean_SMTP_Logger::STATUS_FAILED,
+			$error->get_error_message(),
+			$data
 		);
 	}
 

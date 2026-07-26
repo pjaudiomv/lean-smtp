@@ -67,6 +67,7 @@ class Lean_SMTP_Settings {
 			Lean_SMTP_Mailer::OPTION_FROM_NAME       => 'sanitize_text_field',
 			Lean_SMTP_Mailer::OPTION_FORCE_FROM_MAIL => 'absint',
 			Lean_SMTP_Mailer::OPTION_FORCE_FROM_NAME => 'absint',
+			Lean_SMTP_Mailer::OPTION_REPLY_TO        => 'sanitize_email',
 
 			Lean_SMTP_Mailer::OPTION_SMTP_HOST       => 'sanitize_text_field',
 			Lean_SMTP_Mailer::OPTION_SMTP_PORT       => 'absint',
@@ -86,6 +87,8 @@ class Lean_SMTP_Settings {
 			Lean_SMTP_Resend::OPTION_API_KEY         => [ static::class, 'sanitize_resend_key' ],
 
 			Lean_SMTP_Logger::OPTION_ENABLED         => 'absint',
+			Lean_SMTP_Logger::OPTION_LOG_HEADERS     => 'absint',
+			Lean_SMTP_Logger::OPTION_LOG_BODY        => 'absint',
 		];
 	}
 
@@ -131,7 +134,7 @@ class Lean_SMTP_Settings {
 
 	public static function sanitize_mailer( $value ): string {
 		$value = is_string( $value ) ? $value : '';
-		return isset( Lean_SMTP_Mailer::transports()[ $value ] ) ? $value : Lean_SMTP_Mailer::MAILER_SMTP;
+		return Lean_SMTP_Mailer::is_valid_mailer( $value ) ? $value : Lean_SMTP_Mailer::MAILER_SMTP;
 	}
 
 	public static function sanitize_encryption( $value ): string {
@@ -339,6 +342,7 @@ class Lean_SMTP_Settings {
 			Lean_SMTP_Mailer::MAILER_SES     => __( 'Amazon SES', 'lean-smtp' ),
 			Lean_SMTP_Mailer::MAILER_MAILGUN => __( 'Mailgun', 'lean-smtp' ),
 			Lean_SMTP_Mailer::MAILER_RESEND  => __( 'Resend', 'lean-smtp' ),
+			Lean_SMTP_Mailer::MAILER_OFFLINE => __( 'Offline', 'lean-smtp' ),
 		];
 	}
 
@@ -408,6 +412,7 @@ class Lean_SMTP_Settings {
 			Lean_SMTP_Mailer::MAILER_SES     => __( 'API', 'lean-smtp' ),
 			Lean_SMTP_Mailer::MAILER_MAILGUN => __( 'API', 'lean-smtp' ),
 			Lean_SMTP_Mailer::MAILER_RESEND  => __( 'API', 'lean-smtp' ),
+			Lean_SMTP_Mailer::MAILER_OFFLINE => __( 'Staging', 'lean-smtp' ),
 		];
 		?>
 		<div class="lsmtp-transports">
@@ -478,6 +483,21 @@ class Lean_SMTP_Settings {
 							echo '<div class="lsmtp-force">';
 							self::checkbox_field( Lean_SMTP_Mailer::OPTION_FORCE_FROM_NAME, __( 'Force From Name (override the name other plugins set)', 'lean-smtp' ) );
 							echo '</div>';
+							?>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="<?php echo esc_attr( Lean_SMTP_Mailer::OPTION_REPLY_TO ); ?>"><?php esc_html_e( 'Reply-To', 'lean-smtp' ); ?></label></th>
+						<td>
+							<?php
+							self::text_field(
+								Lean_SMTP_Mailer::OPTION_REPLY_TO,
+								[
+									'type'        => 'email',
+									'placeholder' => (string) get_option( 'admin_email' ),
+									'description' => __( 'Where replies should go, when the From address is a no-reply. Optional; a Reply-To set by the message itself is always kept.', 'lean-smtp' ),
+								]
+							);
 							?>
 						</td>
 					</tr>
@@ -626,6 +646,16 @@ class Lean_SMTP_Settings {
 					</table>
 				</div>
 
+				<div class="lsmtp-card lsmtp-section" data-mailer="offline">
+					<h2><?php esc_html_e( 'Offline', 'lean-smtp' ); ?></h2>
+					<p class="description">
+						<?php esc_html_e( 'No mail is sent and no mail server is contacted. Every message WordPress tries to send is answered as if it had gone out — so plugins behave normally — and recorded in the send log below, which is where you read it. Meant for staging and development sites that must never mail real customers.', 'lean-smtp' ); ?>
+					</p>
+					<p class="description">
+						<?php esc_html_e( 'Turn on the send log, and log the message body, to see what would have been sent.', 'lean-smtp' ); ?>
+					</p>
+				</div>
+
 				<div class="lsmtp-card">
 					<h2><?php esc_html_e( 'Logging', 'lean-smtp' ); ?></h2>
 					<table class="form-table" role="presentation">
@@ -642,6 +672,26 @@ class Lean_SMTP_Settings {
 									)
 								);
 								?>
+							</td>
+						</tr>
+						<tr>
+							<th scope="row"><?php esc_html_e( 'Message Content', 'lean-smtp' ); ?></th>
+							<td>
+								<?php
+								self::checkbox_field(
+									Lean_SMTP_Logger::OPTION_LOG_HEADERS,
+									__( 'Also record the headers and attachment filenames.', 'lean-smtp' )
+								);
+								echo '<div class="lsmtp-force">';
+								self::checkbox_field(
+									Lean_SMTP_Logger::OPTION_LOG_BODY,
+									__( 'Also record the message body.', 'lean-smtp' )
+								);
+								echo '</div>';
+								?>
+								<p class="description">
+									<?php esc_html_e( 'Stored bodies contain whatever your site mails — password-reset links, order details, personal data — readable by anyone who can administer this site or its database. Leave off unless you are debugging, and clear the log when you are done.', 'lean-smtp' ); ?>
+								</p>
 							</td>
 						</tr>
 					</table>
@@ -663,7 +713,13 @@ class Lean_SMTP_Settings {
 		}
 		$result = sanitize_key( wp_unslash( (string) $_GET['lsmtp_test'] ) );
 		if ( 'ok' === $result ) {
-			echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__( 'Test email sent successfully.', 'lean-smtp' ) . '</p></div>';
+			// In offline mode "sent" would be a lie: wp_mail() succeeded, but the
+			// message went to the log rather than to a mail server.
+			$message = Lean_SMTP_Mailer::is_offline()
+				? __( 'Test email captured in the send log. Nothing was sent — the Offline mailer is selected.', 'lean-smtp' )
+				: __( 'Test email sent successfully.', 'lean-smtp' );
+
+			echo '<div class="notice notice-success is-dismissible"><p>' . esc_html( $message ) . '</p></div>';
 		} else {
 			$msg = isset( $_GET['lsmtp_msg'] ) ? sanitize_text_field( wp_unslash( (string) $_GET['lsmtp_msg'] ) ) : '';
 			echo '<div class="notice notice-error is-dismissible"><p>'
@@ -688,6 +744,57 @@ class Lean_SMTP_Settings {
 			</form>
 			<p class="description lsmtp-test-note"><?php esc_html_e( 'On the command line: wp lean-smtp test, or wp lean-smtp status to see the configuration in force.', 'lean-smtp' ); ?></p>
 		</div>
+		<?php
+	}
+
+	/**
+	 * @param object $row A send-log row.
+	 */
+	private static function status_badge( $row ): void {
+		switch ( (string) $row->status ) {
+			case Lean_SMTP_Logger::STATUS_SENT:
+				echo '<span class="lsmtp-badge sent">&#10004; ' . esc_html__( 'Sent', 'lean-smtp' ) . '</span>';
+				break;
+			case Lean_SMTP_Logger::STATUS_OFFLINE:
+				echo '<span class="lsmtp-badge offline">&#9679; ' . esc_html__( 'Offline', 'lean-smtp' ) . '</span>';
+				break;
+			default:
+				echo '<span class="lsmtp-badge failed">&#10008; ' . esc_html__( 'Failed', 'lean-smtp' ) . '</span>';
+				break;
+		}
+	}
+
+	/**
+	 * The expandable second row holding whatever was recorded of the message
+	 * itself. Rendered only when there is something to show — a log kept without
+	 * the content settings has nothing here.
+	 *
+	 * @param object $row A send-log row.
+	 */
+	private static function render_log_detail( $row ): void {
+		$parts = [
+			__( 'Error', 'lean-smtp' )       => (string) ( $row->error ?? '' ),
+			__( 'Headers', 'lean-smtp' )     => (string) ( $row->headers ?? '' ),
+			__( 'Attachments', 'lean-smtp' ) => (string) ( $row->attachments ?? '' ),
+			__( 'Body', 'lean-smtp' )        => (string) ( $row->body ?? '' ),
+		];
+		$parts = array_filter( $parts, static fn( $value ) => '' !== trim( $value ) );
+
+		if ( empty( $parts ) ) {
+			return;
+		}
+		?>
+		<tr class="lsmtp-log-detail">
+			<td colspan="5">
+				<details>
+					<summary><?php esc_html_e( 'Details', 'lean-smtp' ); ?></summary>
+					<?php foreach ( $parts as $label => $value ) : ?>
+						<h4><?php echo esc_html( $label ); ?></h4>
+						<pre><?php echo esc_html( $value ); ?></pre>
+					<?php endforeach; ?>
+				</details>
+			</td>
+		</tr>
 		<?php
 	}
 
@@ -720,14 +827,9 @@ class Lean_SMTP_Settings {
 							<td><?php echo esc_html( strtoupper( (string) $row->mailer ) ); ?></td>
 							<td><?php echo esc_html( (string) $row->to_email ); ?></td>
 							<td><?php echo esc_html( (string) $row->subject ); ?></td>
-							<td>
-								<?php if ( 'sent' === $row->status ) : ?>
-									<span class="lsmtp-badge sent">&#10004; <?php esc_html_e( 'Sent', 'lean-smtp' ); ?></span>
-								<?php else : ?>
-									<span class="lsmtp-badge failed" title="<?php echo esc_attr( (string) $row->error ); ?>">&#10008; <?php esc_html_e( 'Failed', 'lean-smtp' ); ?></span>
-								<?php endif; ?>
-							</td>
+							<td><?php self::status_badge( $row ); ?></td>
 						</tr>
+						<?php self::render_log_detail( $row ); ?>
 					<?php endforeach; ?>
 					</tbody>
 				</table>

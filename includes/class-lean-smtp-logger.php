@@ -4,6 +4,11 @@
  * through the plugin (mailer used, recipients, subject, success/failure and
  * any error). Written only when logging is enabled in settings.
  *
+ * The message itself — headers, attachment filenames and body — is recorded
+ * only when separately opted in. A stored body contains password-reset links,
+ * order details and anything else the site mails, so it is off by default and
+ * governed by its own setting rather than riding along with the log.
+ *
  * @package lean-smtp
  */
 
@@ -13,10 +18,23 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 class Lean_SMTP_Logger {
 
-	const OPTION_ENABLED = 'lean_smtp_logging_enabled';
+	const OPTION_ENABLED     = 'lean_smtp_logging_enabled';
+	const OPTION_LOG_HEADERS = 'lean_smtp_log_headers';
+	const OPTION_LOG_BODY    = 'lean_smtp_log_body';
+
+	/** Bumped whenever the table definition changes; see maybe_upgrade(). */
+	const DB_VERSION        = '2';
+	const OPTION_DB_VERSION = 'lean_smtp_db_version';
 
 	/** How many rows the settings viewer shows and the table is trimmed to. */
 	const MAX_ROWS = 100;
+
+	/** A stored body is truncated past this, so one runaway email can't bloat the table. */
+	const MAX_BODY_BYTES = 65535;
+
+	const STATUS_SENT    = 'sent';
+	const STATUS_FAILED  = 'failed';
+	const STATUS_OFFLINE = 'offline';
 
 	public static function table(): string {
 		global $wpdb;
@@ -24,11 +42,23 @@ class Lean_SMTP_Logger {
 	}
 
 	public static function enabled(): bool {
-		return '1' === (string) get_option( self::OPTION_ENABLED, '0' );
+		return Lean_SMTP_Config::get_bool( self::OPTION_ENABLED );
+	}
+
+	/** Whether to store the message headers and attachment filenames. */
+	public static function log_headers(): bool {
+		return Lean_SMTP_Config::get_bool( self::OPTION_LOG_HEADERS );
+	}
+
+	/** Whether to store the message body. */
+	public static function log_body(): bool {
+		return Lean_SMTP_Config::get_bool( self::OPTION_LOG_BODY );
 	}
 
 	/**
-	 * Create the log table. Called on activation; safe to call repeatedly.
+	 * Create or update the log table. Called on activation and from
+	 * maybe_upgrade(); dbDelta adds any missing column, so it is safe to call
+	 * repeatedly.
 	 */
 	public static function create_table(): void {
 		global $wpdb;
@@ -36,6 +66,9 @@ class Lean_SMTP_Logger {
 		$table           = self::table();
 		$charset_collate = $wpdb->get_charset_collate();
 
+		// The content columns are nullable rather than NOT NULL DEFAULT '':
+		// MySQL won't accept a default on a TEXT column, and null reads as
+		// "not recorded", which is exactly what an opted-out send is.
 		$sql = "CREATE TABLE {$table} (
 			id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
 			sent_at datetime NOT NULL,
@@ -44,24 +77,47 @@ class Lean_SMTP_Logger {
 			subject text NOT NULL,
 			status varchar(10) NOT NULL DEFAULT '',
 			error text NULL,
+			headers mediumtext NULL,
+			body mediumtext NULL,
+			attachments text NULL,
 			PRIMARY KEY  (id),
 			KEY sent_at (sent_at)
 		) {$charset_collate};";
 
 		require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 		dbDelta( $sql );
+
+		update_option( self::OPTION_DB_VERSION, self::DB_VERSION );
+	}
+
+	/**
+	 * Bring an existing install's table up to date.
+	 *
+	 * The activation hook does not fire when a plugin is *updated*, so a new
+	 * column would otherwise never reach a site that already has the table —
+	 * and every insert naming it would fail. The check is a single read of an
+	 * autoloaded option, so it can run on any request; the dbDelta behind it
+	 * runs once per schema bump.
+	 */
+	public static function maybe_upgrade(): void {
+		if ( self::DB_VERSION === (string) get_option( self::OPTION_DB_VERSION, '' ) ) {
+			return;
+		}
+		self::create_table();
 	}
 
 	/**
 	 * Record one send. No-op unless logging is enabled.
 	 *
-	 * @param string          $mailer  'smtp' or 'ses'.
-	 * @param string|string[] $to      Recipient(s).
-	 * @param string          $subject Message subject.
-	 * @param bool            $ok      Whether the send succeeded.
-	 * @param string          $error   Error detail on failure.
+	 * @param string          $mailer    Mailer slug the message went through.
+	 * @param string|string[] $to        Recipient(s).
+	 * @param string          $subject   Message subject.
+	 * @param string          $status    One of the STATUS_* constants.
+	 * @param string          $error     Error detail on failure.
+	 * @param array           $mail_data The wp_mail() arguments (message, headers,
+	 *                                   attachments), for the optional content columns.
 	 */
-	public static function log( string $mailer, $to, string $subject, bool $ok, string $error = '' ): void {
+	public static function log( string $mailer, $to, string $subject, string $status, string $error = '', array $mail_data = [] ): void {
 		if ( ! self::enabled() ) {
 			return;
 		}
@@ -70,21 +126,91 @@ class Lean_SMTP_Logger {
 
 		$to_email = is_array( $to ) ? implode( ', ', $to ) : (string) $to;
 
+		$row = [
+			'sent_at'  => current_time( 'mysql' ),
+			'mailer'   => $mailer,
+			'to_email' => $to_email,
+			'subject'  => $subject,
+			'status'   => $status,
+			'error'    => self::STATUS_FAILED === $status ? $error : null,
+		];
+
+		$row += self::content_columns( $mail_data );
+
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- custom log table, no core API.
 		$wpdb->insert(
 			self::table(),
-			[
-				'sent_at'  => current_time( 'mysql' ),
-				'mailer'   => $mailer,
-				'to_email' => $to_email,
-				'subject'  => $subject,
-				'status'   => $ok ? 'sent' : 'failed',
-				'error'    => $ok ? null : $error,
-			],
-			[ '%s', '%s', '%s', '%s', '%s', '%s' ]
+			$row,
+			[ '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s' ]
 		);
 
 		self::trim();
+	}
+
+	/**
+	 * The optional message columns, honouring the two content settings. Anything
+	 * not opted into stays null — the row records that the send happened, not
+	 * what was in it.
+	 *
+	 * @param array $mail_data The wp_mail() arguments.
+	 * @return array{headers: ?string, body: ?string, attachments: ?string}
+	 */
+	private static function content_columns( array $mail_data ): array {
+		$headers = self::log_headers();
+
+		return [
+			'headers'     => $headers ? self::flatten_headers( $mail_data['headers'] ?? '' ) : null,
+			'body'        => self::log_body() ? self::truncate( (string) ( $mail_data['message'] ?? '' ) ) : null,
+			'attachments' => $headers ? self::flatten_attachments( $mail_data['attachments'] ?? [] ) : null,
+		];
+	}
+
+	/**
+	 * Headers reach wp_mail() as either a newline-delimited string or an array
+	 * of lines; store the readable form of both.
+	 *
+	 * @param string|string[] $headers
+	 */
+	private static function flatten_headers( $headers ): string {
+		if ( is_array( $headers ) ) {
+			$lines = [];
+			foreach ( $headers as $name => $value ) {
+				$lines[] = is_string( $name ) ? $name . ': ' . $value : (string) $value;
+			}
+			$headers = implode( "\n", $lines );
+		}
+		return trim( str_replace( "\r\n", "\n", (string) $headers ) );
+	}
+
+	/**
+	 * Filenames only. The files themselves are on disk and may be enormous;
+	 * what a log reader needs to know is which ones went along.
+	 *
+	 * @param string|string[] $attachments
+	 */
+	private static function flatten_attachments( $attachments ): string {
+		if ( ! is_array( $attachments ) ) {
+			$attachments = explode( "\n", str_replace( "\r\n", "\n", (string) $attachments ) );
+		}
+
+		$names = [];
+		foreach ( $attachments as $name => $path ) {
+			// wp_mail() lets the array key supply a display filename.
+			$names[] = is_string( $name ) && '' !== $name ? $name : basename( (string) $path );
+		}
+
+		return implode( ', ', array_filter( $names ) );
+	}
+
+	private static function truncate( string $body ): string {
+		if ( strlen( $body ) <= self::MAX_BODY_BYTES ) {
+			return $body;
+		}
+		$body = function_exists( 'mb_strcut' )
+			? mb_strcut( $body, 0, self::MAX_BODY_BYTES, 'UTF-8' )
+			: substr( $body, 0, self::MAX_BODY_BYTES );
+
+		return $body . "\n\n" . '[…truncated]';
 	}
 
 	/**

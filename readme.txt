@@ -4,7 +4,7 @@ Tags: smtp, mail, email, ses, wp_mail
 Requires at least: 6.0
 Tested up to: 7.0
 Requires PHP: 8.1
-Stable tag: 0.2.1
+Stable tag: 0.3.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -22,12 +22,14 @@ Every provider below also offers plain SMTP, so the SMTP transport alone covers 
 * **Amazon SES (API)** — the SES v2 API, signed with a hand-rolled AWS Signature V4 signer, so no AWS SDK is bundled.
 * **Mailgun (API)** — US or EU region, sending the message as MIME so attachments and formatting survive untouched.
 * **Resend (API)** — a single API key, nothing else to configure.
+* **Offline** — record every message and send nothing, for staging sites that must never mail real customers. wp_mail() still reports success, so plugins behave exactly as they would in production.
 * **From identity** — set the From name and address, and optionally force them over anything another plugin sets.
+* **Reply-To** — a site-wide default for replies, useful when the From address is a no-reply. A Reply-To the message set itself is always kept.
 * **wp-config.php overrides** — pin any setting in code instead of the database, so credentials can live in environment variables and never diverge between environments.
 * **Failure alerts** — an admin notice when mail stops going out, so a broken mailer isn't discovered via missed password resets. It clears itself once mail works again.
 * **WP-CLI** — `wp lean-smtp test` and `wp lean-smtp status`.
 * **Test email** — a button on the settings page to confirm your configuration works.
-* **Send log** — optional; records the most recent sends (recipient, subject, result) with a viewer and a clear button.
+* **Send log** — optional; records the most recent sends (recipient, subject, result) with a viewer and a clear button. The message headers, attachment filenames and body can each be recorded too, behind their own settings and off by default.
 * **Encrypted secrets** — stored passwords and API keys are AES-256 encrypted, keyed to your site salts.
 
 Deliberately not included: Gmail and Microsoft 365 OAuth. Both need an OAuth consent flow, refresh-token storage, and (for Google) app verification — more machinery than the rest of this plugin combined. Use an app password or a provider above.
@@ -68,7 +70,7 @@ The provider you choose is the data controller for the mail you route through it
 * Mailgun — sends to `api.mailgun.net` or `api.eu.mailgun.net`. Terms: https://www.mailgun.com/legal/terms/ · Privacy: https://www.mailgun.com/legal/privacy-policy/
 * Resend — sends to `api.resend.com`. Terms: https://resend.com/legal/terms-of-service · Privacy: https://resend.com/legal/privacy-policy
 
-The SMTP transport connects only to the host you configure and bundles no third-party service.
+The SMTP transport connects only to the host you configure and bundles no third-party service. The Offline mailer connects to nothing at all: messages are written to the local send log and never leave your server.
 
 == Screenshots ==
 
@@ -79,6 +81,12 @@ The SMTP transport connects only to the host you configure and bundles no third-
 5. Send a test email, and review the optional send log of recent attempts.
 
 == Changelog ==
+
+= 0.3.0 =
+* Added an Offline mailer: every message is recorded and nothing is sent, for staging sites that must not mail real customers. wp_mail() still reports success, so other plugins behave as they would in production.
+* The send log can now record the message headers, attachment filenames and body. Each is a separate setting and both are off by default — a stored body contains password-reset links and anything else your site mails. Recorded content is shown in an expandable row in the log viewer, alongside the full error text for a failed send.
+* Added a Reply-To setting, applied to both the SMTP and API paths. A Reply-To the message set for itself is always kept.
+* The log table is now upgraded in place when the plugin is updated. Previously the table was only ever created on activation, which does not run on update.
 
 = 0.2.1 =
 * The settings screen's CSS and JavaScript are now enqueued as files on that screen only, instead of being printed inline.

@@ -46,6 +46,11 @@ class Lean_SMTP_CLI {
 			WP_CLI::error( $result->get_error_message() );
 		}
 
+		if ( Lean_SMTP_Mailer::is_offline() ) {
+			WP_CLI::success( 'Test email captured in the send log. Nothing was sent — the offline mailer is selected.' );
+			return;
+		}
+
 		WP_CLI::success( 'Test email sent.' );
 	}
 
@@ -80,6 +85,7 @@ class Lean_SMTP_CLI {
 			self::row( __( 'Mailer', 'lean-smtp' ), $mailer, Lean_SMTP_Mailer::OPTION_MAILER ),
 			self::row( __( 'From Email', 'lean-smtp' ), Lean_SMTP_Mailer::from_email(), Lean_SMTP_Mailer::OPTION_FROM_EMAIL ),
 			self::row( __( 'From Name', 'lean-smtp' ), Lean_SMTP_Mailer::from_name(), Lean_SMTP_Mailer::OPTION_FROM_NAME ),
+			self::row( __( 'Reply-To', 'lean-smtp' ), Lean_SMTP_Mailer::reply_to(), Lean_SMTP_Mailer::OPTION_REPLY_TO ),
 		];
 
 		foreach ( self::mailer_rows( $mailer ) as $row ) {
@@ -87,6 +93,8 @@ class Lean_SMTP_CLI {
 		}
 
 		$rows[] = self::row( __( 'Send Log', 'lean-smtp' ), Lean_SMTP_Logger::enabled() ? 'enabled' : 'disabled', Lean_SMTP_Logger::OPTION_ENABLED );
+		$rows[] = self::row( __( 'Log Headers', 'lean-smtp' ), Lean_SMTP_Logger::log_headers() ? 'yes' : 'no', Lean_SMTP_Logger::OPTION_LOG_HEADERS );
+		$rows[] = self::row( __( 'Log Body', 'lean-smtp' ), Lean_SMTP_Logger::log_body() ? 'yes' : 'no', Lean_SMTP_Logger::OPTION_LOG_BODY );
 		$rows[] = [
 			'setting' => __( 'Configured', 'lean-smtp' ),
 			'value'   => Lean_SMTP_Mailer::is_configured() ? 'yes' : 'no',
@@ -140,6 +148,10 @@ class Lean_SMTP_CLI {
 				return [
 					self::secret_row( __( 'Resend API Key', 'lean-smtp' ), Lean_SMTP_Resend::OPTION_API_KEY ),
 				];
+
+			case Lean_SMTP_Mailer::MAILER_OFFLINE:
+				// Nothing to configure — mail is recorded, never sent.
+				return [];
 
 			default:
 				return [

@@ -18,12 +18,14 @@ Every provider below also offers plain SMTP, so the SMTP transport alone covers 
 - **Amazon SES (API)** via the SES v2 endpoint, signed with a hand-rolled AWS Signature V4 signer — **no AWS SDK dependency**.
 - **Mailgun (API)** — US or EU region, sending the message as MIME so attachments and formatting survive untouched.
 - **Resend (API)** — a single API key, nothing else to configure.
+- **Offline** — record every message and send nothing, for staging sites that must never mail real customers. `wp_mail()` still reports success, so other plugins behave exactly as they would in production.
 - **From identity** — set From name/email, with optional "force" to override what other plugins set.
+- **Reply-To** — a site-wide default for replies; a Reply-To the message set for itself is always kept.
 - **wp-config.php overrides** — pin any setting in code, so credentials can live in environment variables and never drift between environments.
 - **Failure alerts** — a dismissible admin notice when mail stops going out; it clears itself once mail works again.
 - **WP-CLI** — `wp lean-smtp test` and `wp lean-smtp status`.
 - **Test email** button on the settings page.
-- **Send log** (optional) with an admin viewer and clear button.
+- **Send log** (optional) with an admin viewer and clear button. Headers, attachment filenames and the message body can each be recorded too — separate settings, both off by default, since a stored body holds password-reset links and personal data.
 - **Encrypted secrets** — stored passwords and API keys are AES-256-CBC encrypted at rest, keyed to the site salts.
 
 Deliberately **not** included: Gmail / Microsoft 365 OAuth. Both need an OAuth consent flow, refresh-token storage, and (for Google) app verification — more machinery than the rest of the plugin combined. Use an app password or one of the providers above.
@@ -32,7 +34,8 @@ Deliberately **not** included: Gmail / Microsoft 365 OAuth. Both need an OAuth c
 
 - **SMTP** is configured on the PHPMailer instance in the `phpmailer_init` action; WordPress does the actual sending.
 - The **API** transports short-circuit `wp_mail()` via the `pre_wp_mail` filter: the plugin assembles the message with PHPMailer once — a faithful port of core's `wp_mail()` handling — then hands it to the selected transport, which adds only authentication and body shape. Raw-MIME providers (SES, Mailgun) read `getSentMIMEMessage()`; Resend reads the structured properties.
-- From name/email are applied through the standard `wp_mail_from` / `wp_mail_from_name` filters, so they govern every transport.
+- **Offline** short-circuits `pre_wp_mail` too, but writes the message to the log and contacts nothing.
+- From name/email are applied through the standard `wp_mail_from` / `wp_mail_from_name` filters, so they govern every transport. Reply-To has no core filter, so it is applied in `phpmailer_init` — which both paths raise, so one handler covers them all.
 
 ## Configuring in wp-config.php
 

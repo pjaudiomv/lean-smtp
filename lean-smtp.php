@@ -2,8 +2,8 @@
 /**
  * Plugin Name: Lean SMTP
  * Plugin URI: https://github.com/pjaudiomv/lean-smtp
- * Description: Routes wp_mail() through an SMTP server or the Amazon SES, Mailgun, or Resend API, with From identity control, wp-config.php overrides, failure alerts, WP-CLI commands, a test-email button, and optional send logging.
- * Version: 0.2.1
+ * Description: Routes wp_mail() through an SMTP server or the Amazon SES, Mailgun, or Resend API, with From identity and Reply-To control, wp-config.php overrides, failure alerts, WP-CLI commands, a test-email button, an offline mode for staging, and optional send logging.
+ * Version: 0.3.0
  * Author: pjaudiomv
  * License: GPL v2 or later
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -14,7 +14,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'LEAN_SMTP_VERSION', '0.2.1' );
+define( 'LEAN_SMTP_VERSION', '0.3.0' );
 define( 'LEAN_SMTP_FILE', __FILE__ );
 define( 'LEAN_SMTP_DIR', plugin_dir_path( __FILE__ ) );
 define( 'LEAN_SMTP_URL', plugin_dir_url( __FILE__ ) );
@@ -50,6 +50,12 @@ class Lean_SMTP {
 		Lean_SMTP_Mailer::init();
 		Lean_SMTP_Notices::init();
 		Lean_SMTP_Settings::init();
+
+		// The activation hook doesn't fire when a plugin is updated, so the log
+		// table is brought up to date on a normal request instead. Mail is sent
+		// from the front end too, so this can't wait for someone to visit
+		// wp-admin — the check is one autoloaded option read.
+		add_action( 'plugins_loaded', [ 'Lean_SMTP_Logger', 'maybe_upgrade' ] );
 
 		if ( defined( 'WP_CLI' ) && WP_CLI ) {
 			Lean_SMTP_CLI::register();
