@@ -74,11 +74,11 @@ The SMTP transport connects only to the host you configure and bundles no third-
 
 == Screenshots ==
 
-1. Settings page: pick a mailer, set the From identity, and configure the transport. A dismissible notice warns when the last send failed.
+1. Settings page: pick a mailer — including Offline, which records mail without sending it — set the From identity and Reply-To, configure the transport, and choose how much of each message the log keeps.
 2. Amazon SES — region and IAM access key; the secret key is stored encrypted and never shown.
 3. Mailgun — sending domain, US/EU region, and API key.
 4. Resend — a single API key.
-5. Send a test email, and review the optional send log of recent attempts.
+5. Send a test email, and review the optional send log. When message content is recorded, each row expands to show the headers, attachment names and body that were sent.
 
 == Changelog ==
 
