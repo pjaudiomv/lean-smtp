@@ -383,6 +383,25 @@ class Test_Lean_SMTP_Mailer extends WP_UnitTestCase {
 		$this->assertSame( 'my-aws-secret/key+value', Lean_SMTP_Crypto::decrypt( $enc2 ) );
 	}
 
+	public function test_credentials_are_stored_verbatim() {
+		// A password is an opaque token: sanitize_text_field() would eat the angle
+		// brackets and the %-sequence below, storing something that looks saved but
+		// no longer authenticates.
+		$password = 'p@ss<w>rd&"100%"#\'*+/=?^`{|}~ end';
+
+		$stored = Lean_SMTP_Settings::sanitize_smtp_password( $password );
+
+		$this->assertSame( $password, Lean_SMTP_Crypto::decrypt( $stored ) );
+	}
+
+	public function test_control_characters_are_stripped_from_credentials() {
+		// Nothing else is removed, but a newline or NUL can never be part of a
+		// credential and could break out of the SMTP dialogue downstream.
+		$stored = Lean_SMTP_Settings::sanitize_resend_key( "re_key\r\nAUTH inject\x00" );
+
+		$this->assertSame( 're_keyAUTH inject', Lean_SMTP_Crypto::decrypt( $stored ) );
+	}
+
 	public function test_ses_success_fires_succeeded_hook_exactly_once() {
 		$this->configure_ses();
 		add_filter(

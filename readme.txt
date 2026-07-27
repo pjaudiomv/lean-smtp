@@ -4,7 +4,7 @@ Tags: smtp, mail, email, ses, wp_mail
 Requires at least: 6.0
 Tested up to: 7.0
 Requires PHP: 8.1
-Stable tag: 0.3.0
+Stable tag: 0.3.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -81,6 +81,9 @@ The SMTP transport connects only to the host you configure and bundles no third-
 5. Send a test email, and review the optional send log. When message content is recorded, each row expands to show the headers, attachment names and body that were sent.
 
 == Changelog ==
+
+= 0.3.1 =
+* Stored passwords and API keys are no longer passed through sanitize_text_field(), which strips characters that are perfectly legal in a credential (angle brackets, percent-encoded sequences) and could leave a saved secret that no longer authenticates. Only control characters are removed now. If your password or API key contains such characters, re-enter it.
 
 = 0.3.0 =
 * Added an Offline mailer: every message is recorded and nothing is sent, for staging sites that must not mail real customers. wp_mail() still reports success, so other plugins behave as they would in production.

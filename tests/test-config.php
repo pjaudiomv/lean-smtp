@@ -83,6 +83,29 @@ class Test_Lean_SMTP_Config extends WP_UnitTestCase {
 		$this->assertSame( 'database-user', $sanitized );
 	}
 
+	public function test_every_setting_has_a_sanitizer_and_a_constant_guard() {
+		// Both are registered per setting, so a new setting can only be missed by
+		// omission — this is what catches that.
+		Lean_SMTP_Settings::register_settings();
+
+		$options    = (array) ( $GLOBALS['new_allowed_options'][ Lean_SMTP_Settings::GROUP ] ?? [] );
+		$registered = get_registered_settings();
+
+		$this->assertNotEmpty( $options );
+
+		foreach ( $options as $option ) {
+			$this->assertTrue(
+				is_callable( $registered[ $option ]['sanitize_callback'] ?? null ),
+				"No sanitize_callback registered for {$option}."
+			);
+			$this->assertSame(
+				20,
+				has_filter( 'sanitize_option_' . $option, [ 'Lean_SMTP_Settings', 'guard_constant' ] ),
+				"No wp-config.php constant guard on {$option}."
+			);
+		}
+	}
+
 	public function test_unpinned_setting_is_sanitized_on_save() {
 		// The registered callback dispatches on the option name, so a stale map
 		// would silently stop sanitizing a setting.

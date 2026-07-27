@@ -4,9 +4,9 @@
  * Mailgun / Resend credentials, a test-email button, and the send log viewer.
  *
  * Any setting can instead be pinned in wp-config.php (see Lean_SMTP_Config).
- * When it is, the field renders read-only and its sanitize callback leaves the
- * stored option alone — so what the page shows is always what is in force, and
- * removing the constant restores whatever was saved before.
+ * When it is, the field renders read-only and guard_constant() discards the
+ * submission — so what the page shows is always what is in force, and removing
+ * the constant restores whatever was saved before.
  *
  * @package lean-smtp
  */
@@ -55,61 +55,57 @@ class Lean_SMTP_Settings {
 	// -------------------------------------------------------------------------
 
 	/**
-	 * Every setting this page owns, mapped to the sanitizer its submitted value
-	 * has to pass through.
+	 * Register every setting this page owns, each with the sanitize callback its
+	 * submitted value has to pass through.
 	 *
-	 * @return array<string, callable>
+	 * Spelled out one call per setting rather than looped over a table, so the
+	 * sanitizer in force for a setting is readable at its own registration.
+	 * Credentials get a sanitizer of their own — see sanitize_secret().
 	 */
-	private static function sanitizers(): array {
-		return [
-			Lean_SMTP_Mailer::OPTION_MAILER          => [ static::class, 'sanitize_mailer' ],
-			Lean_SMTP_Mailer::OPTION_FROM_EMAIL      => 'sanitize_email',
-			Lean_SMTP_Mailer::OPTION_FROM_NAME       => 'sanitize_text_field',
-			Lean_SMTP_Mailer::OPTION_FORCE_FROM_MAIL => 'absint',
-			Lean_SMTP_Mailer::OPTION_FORCE_FROM_NAME => 'absint',
-			Lean_SMTP_Mailer::OPTION_REPLY_TO        => 'sanitize_email',
+	public static function register_settings(): void {
+		register_setting( self::GROUP, Lean_SMTP_Mailer::OPTION_MAILER, [ 'sanitize_callback' => [ static::class, 'sanitize_mailer' ] ] );
+		register_setting( self::GROUP, Lean_SMTP_Mailer::OPTION_FROM_EMAIL, [ 'sanitize_callback' => 'sanitize_email' ] );
+		register_setting( self::GROUP, Lean_SMTP_Mailer::OPTION_FROM_NAME, [ 'sanitize_callback' => 'sanitize_text_field' ] );
+		register_setting( self::GROUP, Lean_SMTP_Mailer::OPTION_FORCE_FROM_MAIL, [ 'sanitize_callback' => 'absint' ] );
+		register_setting( self::GROUP, Lean_SMTP_Mailer::OPTION_FORCE_FROM_NAME, [ 'sanitize_callback' => 'absint' ] );
+		register_setting( self::GROUP, Lean_SMTP_Mailer::OPTION_REPLY_TO, [ 'sanitize_callback' => 'sanitize_email' ] );
 
-			Lean_SMTP_Mailer::OPTION_SMTP_HOST       => 'sanitize_text_field',
-			Lean_SMTP_Mailer::OPTION_SMTP_PORT       => 'absint',
-			Lean_SMTP_Mailer::OPTION_SMTP_ENCRYPTION => [ static::class, 'sanitize_encryption' ],
-			Lean_SMTP_Mailer::OPTION_SMTP_AUTH       => 'absint',
-			Lean_SMTP_Mailer::OPTION_SMTP_USERNAME   => 'sanitize_text_field',
-			Lean_SMTP_Mailer::OPTION_SMTP_PASSWORD   => [ static::class, 'sanitize_smtp_password' ],
+		register_setting( self::GROUP, Lean_SMTP_Mailer::OPTION_SMTP_HOST, [ 'sanitize_callback' => 'sanitize_text_field' ] );
+		register_setting( self::GROUP, Lean_SMTP_Mailer::OPTION_SMTP_PORT, [ 'sanitize_callback' => 'absint' ] );
+		register_setting( self::GROUP, Lean_SMTP_Mailer::OPTION_SMTP_ENCRYPTION, [ 'sanitize_callback' => [ static::class, 'sanitize_encryption' ] ] );
+		register_setting( self::GROUP, Lean_SMTP_Mailer::OPTION_SMTP_AUTH, [ 'sanitize_callback' => 'absint' ] );
+		register_setting( self::GROUP, Lean_SMTP_Mailer::OPTION_SMTP_USERNAME, [ 'sanitize_callback' => 'sanitize_text_field' ] );
+		register_setting( self::GROUP, Lean_SMTP_Mailer::OPTION_SMTP_PASSWORD, [ 'sanitize_callback' => [ static::class, 'sanitize_smtp_password' ] ] );
 
-			Lean_SMTP_SES::OPTION_REGION             => 'sanitize_text_field',
-			Lean_SMTP_SES::OPTION_ACCESS_KEY         => 'sanitize_text_field',
-			Lean_SMTP_SES::OPTION_SECRET_KEY         => [ static::class, 'sanitize_ses_secret' ],
+		register_setting( self::GROUP, Lean_SMTP_SES::OPTION_REGION, [ 'sanitize_callback' => 'sanitize_text_field' ] );
+		register_setting( self::GROUP, Lean_SMTP_SES::OPTION_ACCESS_KEY, [ 'sanitize_callback' => 'sanitize_text_field' ] );
+		register_setting( self::GROUP, Lean_SMTP_SES::OPTION_SECRET_KEY, [ 'sanitize_callback' => [ static::class, 'sanitize_ses_secret' ] ] );
 
-			Lean_SMTP_Mailgun::OPTION_DOMAIN         => 'sanitize_text_field',
-			Lean_SMTP_Mailgun::OPTION_REGION         => [ static::class, 'sanitize_mailgun_region' ],
-			Lean_SMTP_Mailgun::OPTION_API_KEY        => [ static::class, 'sanitize_mailgun_key' ],
+		register_setting( self::GROUP, Lean_SMTP_Mailgun::OPTION_DOMAIN, [ 'sanitize_callback' => 'sanitize_text_field' ] );
+		register_setting( self::GROUP, Lean_SMTP_Mailgun::OPTION_REGION, [ 'sanitize_callback' => [ static::class, 'sanitize_mailgun_region' ] ] );
+		register_setting( self::GROUP, Lean_SMTP_Mailgun::OPTION_API_KEY, [ 'sanitize_callback' => [ static::class, 'sanitize_mailgun_key' ] ] );
 
-			Lean_SMTP_Resend::OPTION_API_KEY         => [ static::class, 'sanitize_resend_key' ],
+		register_setting( self::GROUP, Lean_SMTP_Resend::OPTION_API_KEY, [ 'sanitize_callback' => [ static::class, 'sanitize_resend_key' ] ] );
 
-			Lean_SMTP_Logger::OPTION_ENABLED         => 'absint',
-			Lean_SMTP_Logger::OPTION_LOG_HEADERS     => 'absint',
-			Lean_SMTP_Logger::OPTION_LOG_BODY        => 'absint',
-		];
+		register_setting( self::GROUP, Lean_SMTP_Logger::OPTION_ENABLED, [ 'sanitize_callback' => 'absint' ] );
+		register_setting( self::GROUP, Lean_SMTP_Logger::OPTION_LOG_HEADERS, [ 'sanitize_callback' => 'absint' ] );
+		register_setting( self::GROUP, Lean_SMTP_Logger::OPTION_LOG_BODY, [ 'sanitize_callback' => 'absint' ] );
+
+		self::guard_constant_backed_settings();
 	}
 
 	/**
-	 * Register every setting with its sanitizer, then layer the constant guard
-	 * on top of that sanitizer at a later priority.
+	 * Layer the wp-config.php constant guard on top of every sanitize callback
+	 * registered above, at a later priority so it has the last word.
+	 *
+	 * The option list is read back out of core's own registry for this group, so
+	 * a setting registered above is guarded automatically — there is no second
+	 * list here to fall out of step.
 	 */
-	public static function register_settings(): void {
-		foreach ( self::sanitizers() as $option => $sanitize_callback ) {
-			register_setting(
-				self::GROUP,
-				$option,
-				[
-					// The integer settings are exactly the absint ones: ports and checkboxes.
-					'type'              => 'absint' === $sanitize_callback ? 'integer' : 'string',
-					'sanitize_callback' => $sanitize_callback,
-				]
-			);
+	private static function guard_constant_backed_settings(): void {
+		$options = $GLOBALS['new_allowed_options'][ self::GROUP ] ?? [];
 
-			// Runs after the sanitizer above, and discards its result for any
-			// setting pinned in wp-config.php.
+		foreach ( (array) $options as $option ) {
 			add_filter( "sanitize_option_{$option}", [ static::class, 'guard_constant' ], 20, 2 );
 		}
 	}
@@ -146,11 +142,6 @@ class Lean_SMTP_Settings {
 		return Lean_SMTP_Mailgun::REGION_EU === $value ? Lean_SMTP_Mailgun::REGION_EU : Lean_SMTP_Mailgun::REGION_US;
 	}
 
-	/**
-	 * Encrypt a submitted SMTP password. A blank submission keeps the stored
-	 * value (so re-saving the form doesn't wipe a password the field never
-	 * echoes back).
-	 */
 	public static function sanitize_smtp_password( $value ): string {
 		return self::sanitize_secret( $value, Lean_SMTP_Mailer::OPTION_SMTP_PASSWORD );
 	}
@@ -167,6 +158,19 @@ class Lean_SMTP_Settings {
 		return self::sanitize_secret( $value, Lean_SMTP_Resend::OPTION_API_KEY );
 	}
 
+	/**
+	 * Sanitize and encrypt a submitted credential.
+	 *
+	 * A password or API key is an opaque token, so it is deliberately *not* run
+	 * through sanitize_text_field(): that strips angle brackets and percent-encoded
+	 * octets, all of which are legal in a password, and the result would be stored
+	 * and encrypted looking fine while no longer authenticating. Only control
+	 * characters are removed — they can never be part of a credential, and they are
+	 * what could break out of the SMTP dialogue or an HTTP header downstream.
+	 *
+	 * A blank submission keeps the stored value, so re-saving the form doesn't wipe
+	 * a secret the field never echoes back.
+	 */
 	private static function sanitize_secret( $value, string $option ): string {
 		$value = is_string( $value ) ? trim( $value ) : '';
 		if ( '' === $value ) {
@@ -179,7 +183,10 @@ class Lean_SMTP_Settings {
 		if ( Lean_SMTP_Crypto::is_encrypted( $value ) ) {
 			return $value;
 		}
-		return Lean_SMTP_Crypto::encrypt( sanitize_text_field( $value ) );
+
+		$stripped = preg_replace( '/[\x00-\x1F\x7F]/', '', $value );
+
+		return Lean_SMTP_Crypto::encrypt( trim( is_string( $stripped ) ? $stripped : $value ) );
 	}
 
 	// -------------------------------------------------------------------------
