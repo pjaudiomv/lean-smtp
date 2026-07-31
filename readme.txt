@@ -8,11 +8,13 @@ Stable tag: 0.3.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Route wp_mail() through SMTP or the Amazon SES, Mailgun, or Resend API — with From control, wp-config overrides, and mail-failure alerts.
+Free, no upsells, no telemetry. Routes wp_mail() through SMTP, Amazon SES, Mailgun, or Resend, with failure alerts and an optional send log.
 
 == Description ==
 
-Lean SMTP makes WordPress send its mail through a real mail service instead of the host's default PHP mail, which improves deliverability. It is deliberately small: a handful of transports, a handful of settings, no upsells.
+Lean SMTP makes WordPress send its mail through a real mail service instead of the host's default PHP mail, which improves deliverability. It is deliberately small: a handful of transports, a handful of settings, and nothing else.
+
+**Everything is free.** There is no pro version, no paid add-ons, no locked features, no account to create, and no upsell banners in the admin. Every mailer, the send log, the failure alerts, WP-CLI, offline mode and encrypted credential storage are all in this plugin, for everyone. Nothing phones home — the plugin sends no telemetry or usage data anywhere, and it makes no network requests other than delivering your mail to the provider you configured.
 
 Website: https://leansmtp.com
 
@@ -29,7 +31,7 @@ Every provider below also offers plain SMTP, so the SMTP transport alone covers 
 * **Failure alerts** — an admin notice when mail stops going out, so a broken mailer isn't discovered via missed password resets. It clears itself once mail works again.
 * **WP-CLI** — `wp lean-smtp test` and `wp lean-smtp status`.
 * **Test email** — a button on the settings page to confirm your configuration works.
-* **Send log** — optional; records the most recent sends (recipient, subject, result) with a viewer and a clear button. The message headers, attachment filenames and body can each be recorded too, behind their own settings and off by default.
+* **Send log** — optional; records the most recent sends (recipient, subject, result) with a viewer and a clear button, stored in your own database and never sent anywhere. The message headers, attachment filenames and body can each be recorded too, behind their own settings and off by default.
 * **Encrypted secrets** — stored passwords and API keys are AES-256 encrypted, keyed to your site salts.
 
 Deliberately not included: Gmail and Microsoft 365 OAuth. Both need an OAuth consent flow, refresh-token storage, and (for Google) app verification — more machinery than the rest of this plugin combined. Use an app password or a provider above.
@@ -47,6 +49,20 @@ For Amazon SES: create an IAM user limited to `ses:SendRawEmail`/`ses:SendEmail`
 For Mailgun: use the sending domain exactly as it appears in your Mailgun dashboard, and pick the region matching the account the key was issued in — a US key is not valid against the EU stack.
 
 For Resend: create an API key with send permission and verify your From domain.
+
+== Frequently Asked Questions ==
+
+= Is it really free? Is there a pro version? =
+
+Yes, and no. Every feature is in the plugin you just installed — all four mailers, offline mode, the send log, failure alerts, WP-CLI, encrypted credentials. There is no pro tier, no add-on to buy, no license key, no trial, and no "upgrade" notices in your admin. The plugin is GPLv2 and the source is on GitHub.
+
+= Does it collect any data or phone home? =
+
+No. Lean SMTP has no telemetry, tracking, or analytics, and asks you to create no account. The only outbound connections it makes are to the mail service you configured, to deliver your mail. See "External services" below.
+
+= Where does the send log live? =
+
+In a table in your own WordPress database, capped to the most recent sends and clearable from the settings page. It is off by default; when on, it records recipient, subject and result. Recording the headers, attachment filenames and message body are three further opt-ins, each off by default, because a stored body can contain password-reset links and personal data.
 
 == Configuring in wp-config.php ==
 
