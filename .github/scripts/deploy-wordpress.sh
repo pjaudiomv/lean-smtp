@@ -83,8 +83,10 @@ fi
 COMMIT_TARGETS=(svn/trunk)
 [[ "$HAVE_ASSETS" == "1" ]] && COMMIT_TARGETS+=(svn/assets)
 for d in "${COMMIT_TARGETS[@]}"; do
-	svn stat "$d" | grep '^?' | awk '{print $2}' | xargs -r -I x svn add x@
-	svn stat "$d" | grep '^!' | awk '{print $2}' | xargs -r -I x svn rm --force x@
+	# grep exits 1 when there is nothing to add or nothing to delete, which is the
+	# normal case — without swallowing it, `set -o pipefail` fails the deploy.
+	svn stat "$d" | { grep '^?' || true; } | awk '{print $2}' | xargs -r -I x svn add x@
+	svn stat "$d" | { grep '^!' || true; } | awk '{print $2}' | xargs -r -I x svn rm --force x@
 done
 
 svn stat "${COMMIT_TARGETS[@]}"
