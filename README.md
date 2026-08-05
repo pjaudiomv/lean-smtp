@@ -8,38 +8,38 @@
 [![License: GPL v2](https://img.shields.io/badge/License-GPLv2-blue.svg)](LICENSE)
 [![Website](https://img.shields.io/badge/Website-leansmtp.com-4F46E5.svg)](https://leansmtp.com)
 
-A small WordPress plugin that routes `wp_mail()` through an **SMTP** server or the **Amazon SES**, **Mailgun**, or **Resend** API — the essentials of wp-mail-smtp, without the bulk.
+A small WordPress plugin that routes `wp_mail()` through an **SMTP** server or the **Amazon SES**, **Mailgun**, or **Resend** API. The essentials of wp-mail-smtp, without the bulk.
 
 Every provider below also offers plain SMTP, so the SMTP transport alone covers all of them. The API transports exist for hosts that block outbound mail ports (25/465/587), common on shared hosting and some managed platforms.
 
 ## Features
 
-- **SMTP** transport (TLS / SSL / none, optional auth) — works with any provider.
-- **Amazon SES (API)** via the SES v2 endpoint, signed with a hand-rolled AWS Signature V4 signer — **no AWS SDK dependency**.
-- **Mailgun (API)** — US or EU region, sending the message as MIME so attachments and formatting survive untouched.
-- **Resend (API)** — a single API key, nothing else to configure.
-- **Offline** — record every message and send nothing, for staging sites that must never mail real customers. `wp_mail()` still reports success, so other plugins behave exactly as they would in production.
-- **From identity** — set From name/email, with optional "force" to override what other plugins set.
-- **Reply-To** — a site-wide default for replies; a Reply-To the message set for itself is always kept.
-- **wp-config.php overrides** — pin any setting in code, so credentials can live in environment variables and never drift between environments.
-- **Failure alerts** — a dismissible admin notice when mail stops going out; it clears itself once mail works again.
-- **WP-CLI** — `wp lean-smtp test` and `wp lean-smtp status`.
+- **SMTP** transport (TLS / SSL / none, optional auth), which works with any provider.
+- **Amazon SES (API)** via the SES v2 endpoint, signed with a hand-rolled AWS Signature V4 signer. **No AWS SDK dependency.**
+- **Mailgun (API)**: US or EU region, sending the message as MIME so attachments and formatting survive untouched.
+- **Resend (API)**: a single API key, nothing else to configure.
+- **Offline**: record every message and send nothing, for staging sites that must never mail real customers. `wp_mail()` still reports success, so other plugins behave exactly as they would in production.
+- **From identity**: set From name/email, with optional "force" to override what other plugins set.
+- **Reply-To**: a site-wide default for replies; a Reply-To the message set for itself is always kept.
+- **wp-config.php overrides**: pin any setting in code, so credentials can live in environment variables and never drift between environments.
+- **Failure alerts**: a dismissible admin notice when mail stops going out; it clears itself once mail works again.
+- **WP-CLI**: `wp lean-smtp test` and `wp lean-smtp status`.
 - **Test email** button on the settings page.
-- **Send log** (optional) on an Email Log screen of its own: paging, a status filter with counts, search by recipient or subject, per-row and bulk delete, and adjustable retention (100–5,000 entries). Headers, attachment filenames and the message body can each be recorded too — separate settings, both off by default, since a stored body holds password-reset links and personal data.
-- **Encrypted secrets** — stored passwords and API keys are AES-256-CBC encrypted at rest, keyed to the site salts.
+- **Send log** (optional) on an Email Log screen of its own: paging, a status filter with counts, search by recipient or subject, per-row and bulk delete, and adjustable retention (100 to 5,000 entries). Headers, attachment filenames and the message body can each be recorded too, as separate settings and both off by default, since a stored body holds password-reset links and personal data.
+- **Encrypted secrets**: stored passwords and API keys are AES-256-CBC encrypted at rest, keyed to the site salts.
 
-Deliberately **not** included: Gmail / Microsoft 365 OAuth. Both need an OAuth consent flow, refresh-token storage, and (for Google) app verification — more machinery than the rest of the plugin combined. Use an app password or one of the providers above.
+Deliberately **not** included: Gmail / Microsoft 365 OAuth. Both need an OAuth consent flow, refresh-token storage, and (for Google) app verification. That is more machinery than the rest of the plugin combined. Use an app password or one of the providers above.
 
 ## How it works
 
 - **SMTP** is configured on the PHPMailer instance in the `phpmailer_init` action; WordPress does the actual sending.
-- The **API** transports short-circuit `wp_mail()` via the `pre_wp_mail` filter: the plugin assembles the message with PHPMailer once — a faithful port of core's `wp_mail()` handling — then hands it to the selected transport, which adds only authentication and body shape. Raw-MIME providers (SES, Mailgun) read `getSentMIMEMessage()`; Resend reads the structured properties.
+- The **API** transports short-circuit `wp_mail()` via the `pre_wp_mail` filter: the plugin assembles the message with PHPMailer once, a faithful port of core's `wp_mail()` handling, then hands it to the selected transport, which adds only authentication and body shape. Raw-MIME providers (SES, Mailgun) read `getSentMIMEMessage()`; Resend reads the structured properties.
 - **Offline** short-circuits `pre_wp_mail` too, but writes the message to the log and contacts nothing.
-- From name/email are applied through the standard `wp_mail_from` / `wp_mail_from_name` filters, so they govern every transport. Reply-To has no core filter, so it is applied in `phpmailer_init` — which both paths raise, so one handler covers them all.
+- From name/email are applied through the standard `wp_mail_from` / `wp_mail_from_name` filters, so they govern every transport. Reply-To has no core filter, so it is applied in `phpmailer_init`, which both paths raise, so one handler covers them all.
 
 ## Configuring in wp-config.php
 
-Any setting can be a constant instead of a stored option. The constant name is the option name upper-cased, and it always wins — the settings page shows the field read-only and names the constant.
+Any setting can be a constant instead of a stored option. The constant name is the option name upper-cased, and it always wins. The settings page shows the field read-only and names the constant.
 
 ```php
 define( 'LEAN_SMTP_MAILER', 'ses' );
