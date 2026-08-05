@@ -1,7 +1,8 @@
 <?php
 /**
- * Admin settings page: transport selection, From identity, SMTP / SES /
- * Mailgun / Resend credentials, a test-email button, and the send log viewer.
+ * Lean SMTP → Settings: transport selection, From identity, SMTP / SES /
+ * Mailgun / Resend credentials, logging options and a test-email button. Also
+ * owns the top-level menu both this screen and Lean_SMTP_Log_Page hang off.
  *
  * Any setting can instead be pinned in wp-config.php (see Lean_SMTP_Config).
  * When it is, the field renders read-only and guard_constant() discards the
@@ -21,33 +22,99 @@ class Lean_SMTP_Settings {
 	const GROUP = 'lean-smtp-group';
 
 	/**
-	 * Hook suffix of our own settings screen, so assets load nowhere else.
+	 * Hook suffixes of the plugin's own screens, so assets load nowhere else.
 	 */
-	private static string $hook_suffix = '';
+	private static string $settings_hook = '';
+	private static string $log_hook      = '';
 
 	public static function init(): void {
 		add_action( 'admin_menu', [ static::class, 'admin_menu' ] );
 		add_action( 'admin_init', [ static::class, 'register_settings' ] );
+		add_action( 'admin_init', [ static::class, 'redirect_legacy_url' ] );
 		add_action( 'admin_enqueue_scripts', [ static::class, 'enqueue_assets' ] );
 		add_action( 'admin_post_lean_smtp_test', [ static::class, 'handle_test' ] );
-		add_action( 'admin_post_lean_smtp_clear_log', [ static::class, 'handle_clear_log' ] );
 		add_filter( 'plugin_action_links_' . plugin_basename( LEAN_SMTP_FILE ), [ static::class, 'settings_link' ] );
 	}
 
+	/**
+	 * A URL to one of the plugin's admin screens.
+	 *
+	 * Everything that links to them goes through here — the pages live under a
+	 * top-level menu, so nothing should be spelling out an admin file name.
+	 *
+	 * @param string $page Page slug.
+	 * @param array  $args Extra query arguments.
+	 */
+	public static function url( string $page = self::PAGE, array $args = [] ): string {
+		$url = admin_url( 'admin.php?page=' . rawurlencode( $page ) );
+
+		return empty( $args ) ? $url : add_query_arg( $args, $url );
+	}
+
+	/**
+	 * The settings page lived at Settings → Lean SMTP up to 0.3.1. Bookmarks and
+	 * links from elsewhere would otherwise land on "you are not allowed to access
+	 * this page", since no such option page is registered any more.
+	 */
+	public static function redirect_legacy_url(): void {
+		$target = self::legacy_redirect_target();
+
+		if ( '' === $target ) {
+			return;
+		}
+
+		wp_safe_redirect( $target );
+		exit;
+	}
+
+	/**
+	 * Where the current request should be sent instead, or '' if it is not one of
+	 * the old URLs. Split out from the redirect so it can be asserted on without
+	 * the exit().
+	 */
+	public static function legacy_redirect_target(): string {
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- reading which page was asked for, to point it at the new one.
+		$page = isset( $_GET['page'] ) ? sanitize_key( wp_unslash( (string) $_GET['page'] ) ) : '';
+
+		if ( self::PAGE !== $page || 'options-general.php' !== ( $GLOBALS['pagenow'] ?? '' ) ) {
+			return '';
+		}
+
+		return self::url();
+	}
+
 	public static function settings_link( array $links ): array {
-		$url     = admin_url( 'options-general.php?page=' . self::PAGE );
-		$links[] = "<a href='{$url}'>" . esc_html__( 'Settings', 'lean-smtp' ) . '</a>';
+		$links[] = '<a href="' . esc_url( self::url() ) . '">' . esc_html__( 'Settings', 'lean-smtp' ) . '</a>';
 		return $links;
 	}
 
+	/**
+	 * A top-level menu rather than a Settings entry: mail configuration and the
+	 * send log are two screens, and the log is what someone goes looking for when
+	 * mail stops arriving.
+	 */
 	public static function admin_menu(): void {
-		self::$hook_suffix = (string) add_options_page(
-			__( 'Lean SMTP Settings', 'lean-smtp' ),
+		self::$settings_hook = (string) add_menu_page(
 			__( 'Lean SMTP', 'lean-smtp' ),
+			__( 'Lean SMTP', 'lean-smtp' ),
+			'manage_options',
+			self::PAGE,
+			[ static::class, 'settings_page' ],
+			'dashicons-email-alt'
+		);
+
+		// Re-label the submenu add_menu_page() creates for the parent itself; it
+		// would otherwise read "Lean SMTP → Lean SMTP".
+		add_submenu_page(
+			self::PAGE,
+			__( 'Lean SMTP Settings', 'lean-smtp' ),
+			__( 'Settings', 'lean-smtp' ),
 			'manage_options',
 			self::PAGE,
 			[ static::class, 'settings_page' ]
 		);
+
+		self::$log_hook = Lean_SMTP_Log_Page::register( self::PAGE );
 	}
 
 	// -------------------------------------------------------------------------
@@ -90,6 +157,7 @@ class Lean_SMTP_Settings {
 		register_setting( self::GROUP, Lean_SMTP_Logger::OPTION_ENABLED, [ 'sanitize_callback' => 'absint' ] );
 		register_setting( self::GROUP, Lean_SMTP_Logger::OPTION_LOG_HEADERS, [ 'sanitize_callback' => 'absint' ] );
 		register_setting( self::GROUP, Lean_SMTP_Logger::OPTION_LOG_BODY, [ 'sanitize_callback' => 'absint' ] );
+		register_setting( self::GROUP, Lean_SMTP_Logger::OPTION_RETENTION, [ 'sanitize_callback' => [ static::class, 'sanitize_retention' ] ] );
 
 		self::guard_constant_backed_settings();
 	}
@@ -136,6 +204,16 @@ class Lean_SMTP_Settings {
 	public static function sanitize_encryption( $value ): string {
 		$value = is_string( $value ) ? $value : '';
 		return in_array( $value, [ 'none', 'ssl', 'tls' ], true ) ? $value : 'tls';
+	}
+
+	/**
+	 * Retention is a fixed set of sizes, not a free number — see
+	 * Lean_SMTP_Logger::RETENTION_CHOICES.
+	 */
+	public static function sanitize_retention( $value ): string {
+		$rows = absint( $value );
+
+		return (string) ( in_array( $rows, Lean_SMTP_Logger::RETENTION_CHOICES, true ) ? $rows : Lean_SMTP_Logger::MAX_ROWS );
 	}
 
 	public static function sanitize_mailgun_region( $value ): string {
@@ -209,19 +287,7 @@ class Lean_SMTP_Settings {
 			]
 			: [ 'lsmtp_test' => 'ok' ];
 
-		wp_safe_redirect( add_query_arg( $args, admin_url( 'options-general.php?page=' . self::PAGE ) ) );
-		exit;
-	}
-
-	public static function handle_clear_log(): void {
-		if ( ! current_user_can( 'manage_options' ) ) {
-			wp_die( esc_html__( 'You do not have permission to do that.', 'lean-smtp' ) );
-		}
-		check_admin_referer( 'lean_smtp_clear_log' );
-
-		Lean_SMTP_Logger::clear();
-
-		wp_safe_redirect( add_query_arg( 'lsmtp_cleared', '1', admin_url( 'options-general.php?page=' . self::PAGE ) ) );
+		wp_safe_redirect( self::url( self::PAGE, $args ) );
 		exit;
 	}
 
@@ -354,18 +420,27 @@ class Lean_SMTP_Settings {
 	}
 
 	/**
-	 * Stylesheet and script for this screen only. The script's PHP-side inputs
-	 * (the mailer option name and the transport labels) are handed over with
-	 * wp_localize_script() rather than printed inline.
+	 * Stylesheet on both of the plugin's screens, script on the settings screen
+	 * only — it exists to toggle the credential sections, which the log page has
+	 * none of. The script's PHP-side inputs (the mailer option name and the
+	 * transport labels) are handed over with wp_localize_script() rather than
+	 * printed inline.
 	 *
 	 * @param string $hook_suffix The current admin page.
 	 */
 	public static function enqueue_assets( string $hook_suffix ): void {
-		if ( '' === self::$hook_suffix || $hook_suffix !== self::$hook_suffix ) {
+		$ours = array_filter( [ self::$settings_hook, self::$log_hook ] );
+
+		if ( ! in_array( $hook_suffix, $ours, true ) ) {
 			return;
 		}
 
 		wp_enqueue_style( 'lean-smtp-settings', LEAN_SMTP_URL . 'css/settings.css', [], LEAN_SMTP_VERSION );
+
+		if ( self::$settings_hook !== $hook_suffix ) {
+			return;
+		}
+
 		wp_enqueue_script( 'lean-smtp-settings', LEAN_SMTP_URL . 'js/settings.js', [], LEAN_SMTP_VERSION, true );
 		wp_localize_script(
 			'lean-smtp-settings',
@@ -379,8 +454,15 @@ class Lean_SMTP_Settings {
 
 	/**
 	 * Branded header with a status pill naming the transport currently in force.
+	 * Shared by both screens, so the log page carries the same chrome.
+	 *
+	 * @param string $active_mailer Mailer slug, or '' to read the one in force.
 	 */
-	private static function render_header( string $active_mailer ): void {
+	public static function render_header( string $active_mailer = '' ): void {
+		if ( '' === $active_mailer ) {
+			$active_mailer = Lean_SMTP_Config::get_string( Lean_SMTP_Mailer::OPTION_MAILER, Lean_SMTP_Mailer::MAILER_SMTP );
+		}
+
 		$labels = self::mailer_labels();
 		$label  = $labels[ $active_mailer ] ?? $labels[ Lean_SMTP_Mailer::MAILER_SMTP ];
 		?>
@@ -444,10 +526,6 @@ class Lean_SMTP_Settings {
 
 			<?php settings_errors(); ?>
 			<?php self::test_notice(); ?>
-
-			<?php if ( isset( $_GET['lsmtp_cleared'] ) ) : // phpcs:ignore WordPress.Security.NonceVerification.Recommended ?>
-				<div class="notice notice-success is-dismissible"><p><?php esc_html_e( 'Send log cleared.', 'lean-smtp' ); ?></p></div>
-			<?php endif; ?>
 
 			<form method="post" action="options.php">
 				<?php settings_fields( self::GROUP ); ?>
@@ -672,11 +750,29 @@ class Lean_SMTP_Settings {
 								<?php
 								self::checkbox_field(
 									Lean_SMTP_Logger::OPTION_ENABLED,
-									sprintf(
-										/* translators: %d: number of rows retained. */
-										__( 'Record the last %d send attempts (recipient, subject, result).', 'lean-smtp' ),
-										(int) Lean_SMTP_Logger::MAX_ROWS
-									)
+									__( 'Record each send attempt (recipient, subject, result).', 'lean-smtp' )
+								);
+								?>
+								<p class="description">
+									<?php
+									printf(
+										/* translators: %s: link to the Email Log screen. */
+										esc_html__( 'Recorded mail is listed under %s.', 'lean-smtp' ),
+										'<a href="' . esc_url( Lean_SMTP_Log_Page::url() ) . '">' . esc_html__( 'Email Log', 'lean-smtp' ) . '</a>'
+									);
+									?>
+								</p>
+							</td>
+						</tr>
+						<tr>
+							<th scope="row"><label for="<?php echo esc_attr( Lean_SMTP_Logger::OPTION_RETENTION ); ?>"><?php esc_html_e( 'Keep', 'lean-smtp' ); ?></label></th>
+							<td>
+								<?php
+								self::select_field(
+									Lean_SMTP_Logger::OPTION_RETENTION,
+									self::retention_choices(),
+									(string) Lean_SMTP_Logger::MAX_ROWS,
+									__( 'Older entries are dropped as new mail is logged, so the table stays bounded.', 'lean-smtp' )
 								);
 								?>
 							</td>
@@ -708,9 +804,27 @@ class Lean_SMTP_Settings {
 			</form>
 
 			<?php self::render_test_form(); ?>
-			<?php self::render_log(); ?>
 		</div>
 		<?php
+	}
+
+	/**
+	 * Retention sizes as select choices, e.g. 1000 => "1,000 entries".
+	 *
+	 * @return array<string, string>
+	 */
+	private static function retention_choices(): array {
+		$choices = [];
+
+		foreach ( Lean_SMTP_Logger::RETENTION_CHOICES as $rows ) {
+			$choices[ (string) $rows ] = sprintf(
+				/* translators: %s: number of log entries. */
+				_n( '%s entry', '%s entries', $rows, 'lean-smtp' ),
+				number_format_i18n( $rows )
+			);
+		}
+
+		return $choices;
 	}
 
 	private static function test_notice(): void {
@@ -750,102 +864,6 @@ class Lean_SMTP_Settings {
 				<?php submit_button( __( 'Send Test Email', 'lean-smtp' ), 'secondary', 'submit', false ); ?>
 			</form>
 			<p class="description lsmtp-test-note"><?php esc_html_e( 'On the command line: wp lean-smtp test, or wp lean-smtp status to see the configuration in force.', 'lean-smtp' ); ?></p>
-		</div>
-		<?php
-	}
-
-	/**
-	 * @param object $row A send-log row.
-	 */
-	private static function status_badge( $row ): void {
-		switch ( (string) $row->status ) {
-			case Lean_SMTP_Logger::STATUS_SENT:
-				echo '<span class="lsmtp-badge sent">&#10004; ' . esc_html__( 'Sent', 'lean-smtp' ) . '</span>';
-				break;
-			case Lean_SMTP_Logger::STATUS_OFFLINE:
-				echo '<span class="lsmtp-badge offline">&#9679; ' . esc_html__( 'Offline', 'lean-smtp' ) . '</span>';
-				break;
-			default:
-				echo '<span class="lsmtp-badge failed">&#10008; ' . esc_html__( 'Failed', 'lean-smtp' ) . '</span>';
-				break;
-		}
-	}
-
-	/**
-	 * The expandable second row holding whatever was recorded of the message
-	 * itself. Rendered only when there is something to show — a log kept without
-	 * the content settings has nothing here.
-	 *
-	 * @param object $row A send-log row.
-	 */
-	private static function render_log_detail( $row ): void {
-		$parts = [
-			__( 'Error', 'lean-smtp' )       => (string) ( $row->error ?? '' ),
-			__( 'Headers', 'lean-smtp' )     => (string) ( $row->headers ?? '' ),
-			__( 'Attachments', 'lean-smtp' ) => (string) ( $row->attachments ?? '' ),
-			__( 'Body', 'lean-smtp' )        => (string) ( $row->body ?? '' ),
-		];
-		$parts = array_filter( $parts, static fn( $value ) => '' !== trim( $value ) );
-
-		if ( empty( $parts ) ) {
-			return;
-		}
-		?>
-		<tr class="lsmtp-log-detail">
-			<td colspan="5">
-				<details>
-					<summary><?php esc_html_e( 'Details', 'lean-smtp' ); ?></summary>
-					<?php foreach ( $parts as $label => $value ) : ?>
-						<h4><?php echo esc_html( $label ); ?></h4>
-						<pre><?php echo esc_html( $value ); ?></pre>
-					<?php endforeach; ?>
-				</details>
-			</td>
-		</tr>
-		<?php
-	}
-
-	private static function render_log(): void {
-		if ( ! Lean_SMTP_Logger::enabled() ) {
-			return;
-		}
-
-		$rows = Lean_SMTP_Logger::recent( 25 );
-		?>
-		<div class="lsmtp-card">
-			<h2><?php esc_html_e( 'Recent Sends', 'lean-smtp' ); ?></h2>
-			<?php if ( empty( $rows ) ) : ?>
-				<p><?php esc_html_e( 'No mail has been logged yet.', 'lean-smtp' ); ?></p>
-			<?php else : ?>
-				<table class="widefat striped lsmtp-log">
-					<thead>
-						<tr>
-							<th><?php esc_html_e( 'Time', 'lean-smtp' ); ?></th>
-							<th><?php esc_html_e( 'Mailer', 'lean-smtp' ); ?></th>
-							<th><?php esc_html_e( 'To', 'lean-smtp' ); ?></th>
-							<th><?php esc_html_e( 'Subject', 'lean-smtp' ); ?></th>
-							<th><?php esc_html_e( 'Result', 'lean-smtp' ); ?></th>
-						</tr>
-					</thead>
-					<tbody>
-					<?php foreach ( $rows as $row ) : ?>
-						<tr>
-							<td><?php echo esc_html( (string) $row->sent_at ); ?></td>
-							<td><?php echo esc_html( strtoupper( (string) $row->mailer ) ); ?></td>
-							<td><?php echo esc_html( (string) $row->to_email ); ?></td>
-							<td><?php echo esc_html( (string) $row->subject ); ?></td>
-							<td><?php self::status_badge( $row ); ?></td>
-						</tr>
-						<?php self::render_log_detail( $row ); ?>
-					<?php endforeach; ?>
-					</tbody>
-				</table>
-				<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" class="lsmtp-clear-form">
-					<input type="hidden" name="action" value="lean_smtp_clear_log" />
-					<?php wp_nonce_field( 'lean_smtp_clear_log' ); ?>
-					<?php submit_button( __( 'Clear Log', 'lean-smtp' ), 'delete', 'submit', false ); ?>
-				</form>
-			<?php endif; ?>
 		</div>
 		<?php
 	}

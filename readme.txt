@@ -4,7 +4,7 @@ Tags: smtp, mail, email, ses, wp_mail
 Requires at least: 6.0
 Tested up to: 7.0
 Requires PHP: 8.1
-Stable tag: 0.3.1
+Stable tag: 0.4.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,7 +31,7 @@ Every provider below also offers plain SMTP, so the SMTP transport alone covers 
 * **Failure alerts** — an admin notice when mail stops going out, so a broken mailer isn't discovered via missed password resets. It clears itself once mail works again.
 * **WP-CLI** — `wp lean-smtp test` and `wp lean-smtp status`.
 * **Test email** — a button on the settings page to confirm your configuration works.
-* **Send log** — optional; records the most recent sends (recipient, subject, result) with a viewer and a clear button, stored in your own database and never sent anywhere. The message headers, attachment filenames and body can each be recorded too, behind their own settings and off by default.
+* **Send log** — optional; records each send (recipient, subject, result) on an Email Log screen with paging, a status filter, search, and per-row or bulk delete. Stored in your own database and never sent anywhere. The message headers, attachment filenames and body can each be recorded too, behind their own settings and off by default.
 * **Encrypted secrets** — stored passwords and API keys are AES-256 encrypted, keyed to your site salts.
 
 Deliberately not included: Gmail and Microsoft 365 OAuth. Both need an OAuth consent flow, refresh-token storage, and (for Google) app verification — more machinery than the rest of this plugin combined. Use an app password or a provider above.
@@ -39,7 +39,7 @@ Deliberately not included: Gmail and Microsoft 365 OAuth. Both need an OAuth con
 == Installation ==
 
 1. Upload the plugin and activate it.
-2. Go to Settings → Lean SMTP.
+2. Go to Lean SMTP → Settings.
 3. Choose a mailer and fill in the connection details.
 4. Set your From Email and From Name.
 5. Save, then use "Send a Test Email" to confirm it works.
@@ -62,7 +62,7 @@ No. Lean SMTP has no telemetry, tracking, or analytics, and asks you to create n
 
 = Where does the send log live? =
 
-In a table in your own WordPress database, capped to the most recent sends and clearable from the settings page. It is off by default; when on, it records recipient, subject and result. Recording the headers, attachment filenames and message body are three further opt-ins, each off by default, because a stored body can contain password-reset links and personal data.
+In a table in your own WordPress database, read under Lean SMTP → Email Log. It is capped to the newest entries — 100 by default, adjustable up to 5,000 — and can be cleared or deleted from a row at a time. It is off by default; when on, it records recipient, subject and result. Recording the headers, attachment filenames and message body are three further opt-ins, each off by default, because a stored body can contain password-reset links and personal data.
 
 == Configuring in wp-config.php ==
 
@@ -90,13 +90,19 @@ The SMTP transport connects only to the host you configure and bundles no third-
 
 == Screenshots ==
 
-1. Settings page: pick a mailer — including Offline, which records mail without sending it — set the From identity and Reply-To, configure the transport, and choose how much of each message the log keeps.
+1. Settings: pick a mailer — including Offline, which records mail without sending it — set the From identity and Reply-To, configure the transport, and choose how much of each message the log keeps.
 2. Amazon SES — region and IAM access key; the secret key is stored encrypted and never shown.
 3. Mailgun — sending domain, US/EU region, and API key.
 4. Resend — a single API key.
-5. Send a test email, and review the optional send log. When message content is recorded, each row expands to show the headers, attachment names and body that were sent.
+5. Send a test email from the Settings screen to confirm the configuration works.
+6. Email Log: every send, filterable by result and searchable by recipient or subject. When message content is recorded, a row expands to show the headers, attachment names and body that were sent.
 
 == Changelog ==
+
+= 0.4.0 =
+* Lean SMTP now has its own top-level admin menu, with Settings and Email Log as separate screens. The old Settings → Lean SMTP address redirects to the new one, so existing bookmarks keep working.
+* The send log has moved to a screen of its own and is now a proper list: paging, a status filter (sent / failed / offline) with counts, search by recipient or subject, per-row and bulk delete, and an adjustable rows-per-page. Recorded message content still expands in place under its row.
+* Added a log retention setting — keep the newest 100, 500, 1,000 or 5,000 entries. The default is unchanged at 100, and it can be pinned in wp-config.php as LEAN_SMTP_LOG_RETENTION like any other setting.
 
 = 0.3.1 =
 * Stored passwords and API keys are no longer passed through sanitize_text_field(), which strips characters that are perfectly legal in a credential (angle brackets, percent-encoded sequences) and could leave a saved secret that no longer authenticates. Only control characters are removed now. If your password or API key contains such characters, re-enter it.

@@ -25,7 +25,7 @@ Every provider below also offers plain SMTP, so the SMTP transport alone covers 
 - **Failure alerts** — a dismissible admin notice when mail stops going out; it clears itself once mail works again.
 - **WP-CLI** — `wp lean-smtp test` and `wp lean-smtp status`.
 - **Test email** button on the settings page.
-- **Send log** (optional) with an admin viewer and clear button. Headers, attachment filenames and the message body can each be recorded too — separate settings, both off by default, since a stored body holds password-reset links and personal data.
+- **Send log** (optional) on an Email Log screen of its own: paging, a status filter with counts, search by recipient or subject, per-row and bulk delete, and adjustable retention (100–5,000 entries). Headers, attachment filenames and the message body can each be recorded too — separate settings, both off by default, since a stored body holds password-reset links and personal data.
 - **Encrypted secrets** — stored passwords and API keys are AES-256-CBC encrypted at rest, keyed to the site salts.
 
 Deliberately **not** included: Gmail / Microsoft 365 OAuth. Both need an OAuth consent flow, refresh-token storage, and (for Google) app verification — more machinery than the rest of the plugin combined. Use an app password or one of the providers above.

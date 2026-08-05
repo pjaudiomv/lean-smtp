@@ -3,7 +3,7 @@
  * Plugin Name: Lean SMTP
  * Plugin URI: https://github.com/pjaudiomv/lean-smtp
  * Description: Free, no upsells, no telemetry. Routes wp_mail() through an SMTP server or the Amazon SES, Mailgun, or Resend API, with From identity and Reply-To control, wp-config.php overrides, failure alerts, WP-CLI commands, a test-email button, an offline mode for staging, and optional send logging.
- * Version: 0.3.1
+ * Version: 0.4.0
  * Author: pjaudiomv
  * License: GPL v2 or later
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -14,7 +14,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'LEAN_SMTP_VERSION', '0.3.1' );
+define( 'LEAN_SMTP_VERSION', '0.4.0' );
 define( 'LEAN_SMTP_FILE', __FILE__ );
 define( 'LEAN_SMTP_DIR', plugin_dir_path( __FILE__ ) );
 define( 'LEAN_SMTP_URL', plugin_dir_url( __FILE__ ) );
@@ -30,6 +30,9 @@ require_once LEAN_SMTP_DIR . 'includes/class-lean-smtp-resend.php';
 require_once LEAN_SMTP_DIR . 'includes/class-lean-smtp-mailer.php';
 require_once LEAN_SMTP_DIR . 'includes/class-lean-smtp-notices.php';
 require_once LEAN_SMTP_DIR . 'includes/class-lean-smtp-settings.php';
+// The list table this page builds is required from the screen's own load- hook:
+// WP_List_Table exists only inside wp-admin, and mail is sent from the front end too.
+require_once LEAN_SMTP_DIR . 'includes/class-lean-smtp-log-page.php';
 
 if ( defined( 'WP_CLI' ) && WP_CLI ) {
 	require_once LEAN_SMTP_DIR . 'includes/class-lean-smtp-cli.php';
@@ -50,6 +53,7 @@ class Lean_SMTP {
 		Lean_SMTP_Mailer::init();
 		Lean_SMTP_Notices::init();
 		Lean_SMTP_Settings::init();
+		Lean_SMTP_Log_Page::init();
 
 		// The activation hook doesn't fire when a plugin is updated, so the log
 		// table is brought up to date on a normal request instead. Mail is sent
