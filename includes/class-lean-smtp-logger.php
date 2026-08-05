@@ -21,13 +21,21 @@ class Lean_SMTP_Logger {
 	const OPTION_ENABLED     = 'lean_smtp_logging_enabled';
 	const OPTION_LOG_HEADERS = 'lean_smtp_log_headers';
 	const OPTION_LOG_BODY    = 'lean_smtp_log_body';
+	const OPTION_RETENTION   = 'lean_smtp_log_retention';
 
 	/** Bumped whenever the table definition changes; see maybe_upgrade(). */
 	const DB_VERSION        = '2';
 	const OPTION_DB_VERSION = 'lean_smtp_db_version';
 
-	/** How many rows the settings viewer shows and the table is trimmed to. */
+	/** Rows kept when no retention has been chosen. */
 	const MAX_ROWS = 100;
+
+	/**
+	 * The retention sizes offered. A free-text row count would invite someone to
+	 * type a number that turns the log into an unbounded table, which is the one
+	 * thing trim() exists to prevent.
+	 */
+	const RETENTION_CHOICES = [ 100, 500, 1000, 5000 ];
 
 	/** A stored body is truncated past this, so one runaway email can't bloat the table. */
 	const MAX_BODY_BYTES = 65535;
@@ -53,6 +61,17 @@ class Lean_SMTP_Logger {
 	/** Whether to store the message body. */
 	public static function log_body(): bool {
 		return Lean_SMTP_Config::get_bool( self::OPTION_LOG_BODY );
+	}
+
+	/**
+	 * How many rows the table is trimmed to. Anything outside the offered set —
+	 * an unset option, or a wp-config.php constant with a typo in it — falls back
+	 * to the default rather than being honoured.
+	 */
+	public static function retention(): int {
+		$rows = (int) Lean_SMTP_Config::get( self::OPTION_RETENTION, self::MAX_ROWS );
+
+		return in_array( $rows, self::RETENTION_CHOICES, true ) ? $rows : self::MAX_ROWS;
 	}
 
 	/**
@@ -214,14 +233,14 @@ class Lean_SMTP_Logger {
 	}
 
 	/**
-	 * Keep the table bounded — drop everything older than the newest MAX_ROWS.
+	 * Keep the table bounded — drop everything older than the newest retained rows.
 	 */
 	private static function trim(): void {
 		global $wpdb;
 		$table = self::table();
 
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- $table is $wpdb->prefix plus a fixed suffix, never user input.
-		$cutoff = $wpdb->get_var( $wpdb->prepare( "SELECT id FROM {$table} ORDER BY id DESC LIMIT 1 OFFSET %d", self::MAX_ROWS ) );
+		$cutoff = $wpdb->get_var( $wpdb->prepare( "SELECT id FROM {$table} ORDER BY id DESC LIMIT 1 OFFSET %d", self::retention() ) );
 		if ( null !== $cutoff ) {
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- $table is $wpdb->prefix plus a fixed suffix, never user input.
 			$wpdb->query( $wpdb->prepare( "DELETE FROM {$table} WHERE id <= %d", (int) $cutoff ) );
@@ -239,6 +258,145 @@ class Lean_SMTP_Logger {
 
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- $table is $wpdb->prefix plus a fixed suffix, never user input.
 		return (array) $wpdb->get_results( $wpdb->prepare( "SELECT * FROM {$table} ORDER BY id DESC LIMIT %d", $limit ) );
+	}
+
+	/**
+	 * A filtered page of rows, newest first — what the Email Log screen lists.
+	 *
+	 * Ordering is by id rather than sent_at: it is the same order (rows are only
+	 * ever appended) and it is the primary key, so there is nothing to sort.
+	 *
+	 * @param array $args status, search, order, per_page, offset.
+	 * @return array<int, object>
+	 */
+	public static function query( array $args = [] ): array {
+		global $wpdb;
+
+		$args = wp_parse_args(
+			$args,
+			[
+				'status'   => '',
+				'search'   => '',
+				'order'    => 'DESC',
+				'per_page' => 20,
+				'offset'   => 0,
+			]
+		);
+
+		list( $where, $params ) = self::where( $args );
+
+		$table = self::table();
+		$order = 'ASC' === strtoupper( (string) $args['order'] ) ? 'ASC' : 'DESC';
+
+		$params[] = max( 1, (int) $args['per_page'] );
+		$params[] = max( 0, (int) $args['offset'] );
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- $table is $wpdb->prefix plus a fixed suffix; $where and $order are built here from placeholders and a two-way choice, never from user input.
+		return (array) $wpdb->get_results( $wpdb->prepare( "SELECT * FROM {$table} {$where} ORDER BY id {$order} LIMIT %d OFFSET %d", $params ) );
+	}
+
+	/**
+	 * How many rows match the same filter — the pagination total.
+	 *
+	 * @param array $args status, search.
+	 */
+	public static function count( array $args = [] ): int {
+		global $wpdb;
+
+		$args = wp_parse_args(
+			$args,
+			[
+				'status' => '',
+				'search' => '',
+			]
+		);
+
+		list( $where, $params ) = self::where( $args );
+
+		$table = self::table();
+		$sql   = "SELECT COUNT(*) FROM {$table} {$where}";
+
+		// An unfiltered count has no placeholders, and prepare() with none is an error.
+		if ( ! empty( $params ) ) {
+			// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- $sql is built above from placeholders only.
+			$sql = $wpdb->prepare( $sql, $params );
+		}
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared -- see above.
+		return (int) $wpdb->get_var( $sql );
+	}
+
+	/**
+	 * Row counts keyed by status, plus an 'all' total — the log screen's filter
+	 * links, in one query rather than one per status.
+	 *
+	 * @return array<string, int>
+	 */
+	public static function counts_by_status(): array {
+		global $wpdb;
+		$table = self::table();
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- $table is $wpdb->prefix plus a fixed suffix, never user input.
+		$rows = (array) $wpdb->get_results( "SELECT status, COUNT(*) AS total FROM {$table} GROUP BY status" );
+
+		$counts = [ 'all' => 0 ];
+		foreach ( $rows as $row ) {
+			$total                            = (int) $row->total;
+			$counts[ (string) $row->status ]   = $total;
+			$counts['all']                    += $total;
+		}
+
+		return $counts;
+	}
+
+	/**
+	 * Delete the given rows.
+	 *
+	 * @param array<int, int|string> $ids Row ids.
+	 * @return int Rows deleted.
+	 */
+	public static function delete( array $ids ): int {
+		global $wpdb;
+
+		$ids = array_values( array_filter( array_map( 'absint', $ids ) ) );
+		if ( empty( $ids ) ) {
+			return 0;
+		}
+
+		$table        = self::table();
+		$placeholders = implode( ', ', array_fill( 0, count( $ids ), '%d' ) );
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- $table is a fixed suffix on $wpdb->prefix; $placeholders is a generated list of %d, and every id is bound through prepare().
+		return (int) $wpdb->query( $wpdb->prepare( "DELETE FROM {$table} WHERE id IN ({$placeholders})", $ids ) );
+	}
+
+	/**
+	 * The WHERE fragment shared by query() and count(), with the values to bind.
+	 *
+	 * @param array $args status, search.
+	 * @return array{0: string, 1: array} SQL beginning with WHERE (or an empty string), and its parameters.
+	 */
+	private static function where( array $args ): array {
+		global $wpdb;
+
+		$clauses = [];
+		$params  = [];
+
+		$status = (string) ( $args['status'] ?? '' );
+		if ( '' !== $status ) {
+			$clauses[] = 'status = %s';
+			$params[]  = $status;
+		}
+
+		$search = (string) ( $args['search'] ?? '' );
+		if ( '' !== $search ) {
+			$like      = '%' . $wpdb->esc_like( $search ) . '%';
+			$clauses[] = '( to_email LIKE %s OR subject LIKE %s )';
+			$params[]  = $like;
+			$params[]  = $like;
+		}
+
+		return [ empty( $clauses ) ? '' : 'WHERE ' . implode( ' AND ', $clauses ), $params ];
 	}
 
 	public static function clear(): void {

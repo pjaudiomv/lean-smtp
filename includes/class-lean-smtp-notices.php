@@ -124,7 +124,7 @@ class Lean_SMTP_Notices {
 				<p><code><?php echo esc_html( (string) $failure['message'] ); ?></code></p>
 			<?php endif; ?>
 			<p>
-				<a href="<?php echo esc_url( admin_url( 'options-general.php?page=' . Lean_SMTP_Settings::PAGE ) ); ?>">
+				<a href="<?php echo esc_url( Lean_SMTP_Settings::url() ); ?>">
 					<?php esc_html_e( 'Check your mail settings', 'lean-smtp' ); ?>
 				</a>
 				&nbsp;|&nbsp;

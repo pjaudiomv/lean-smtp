@@ -34,6 +34,7 @@ $lean_smtp_options = [
 	'lean_smtp_logging_enabled',
 	'lean_smtp_log_headers',
 	'lean_smtp_log_body',
+	'lean_smtp_log_retention',
 	'lean_smtp_db_version',
 	'lean_smtp_last_failure',
 ];
@@ -41,6 +42,9 @@ $lean_smtp_options = [
 foreach ( $lean_smtp_options as $lean_smtp_option ) {
 	delete_option( $lean_smtp_option );
 }
+
+// The Email Log screen's per-page preference is user meta, not an option.
+delete_metadata( 'user', 0, 'lean_smtp_log_per_page', '', true );
 
 global $wpdb;
 // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.DirectDatabaseQuery.SchemaChange

@@ -95,6 +95,7 @@ class Lean_SMTP_CLI {
 		$rows[] = self::row( __( 'Send Log', 'lean-smtp' ), Lean_SMTP_Logger::enabled() ? 'enabled' : 'disabled', Lean_SMTP_Logger::OPTION_ENABLED );
 		$rows[] = self::row( __( 'Log Headers', 'lean-smtp' ), Lean_SMTP_Logger::log_headers() ? 'yes' : 'no', Lean_SMTP_Logger::OPTION_LOG_HEADERS );
 		$rows[] = self::row( __( 'Log Body', 'lean-smtp' ), Lean_SMTP_Logger::log_body() ? 'yes' : 'no', Lean_SMTP_Logger::OPTION_LOG_BODY );
+		$rows[] = self::row( __( 'Log Retention', 'lean-smtp' ), (string) Lean_SMTP_Logger::retention() . ' rows', Lean_SMTP_Logger::OPTION_RETENTION );
 		$rows[] = [
 			'setting' => __( 'Configured', 'lean-smtp' ),
 			'value'   => Lean_SMTP_Mailer::is_configured() ? 'yes' : 'no',

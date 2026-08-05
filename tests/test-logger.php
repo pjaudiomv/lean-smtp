@@ -19,6 +19,7 @@ class Test_Lean_SMTP_Logger extends WP_UnitTestCase {
 		parent::set_up();
 		delete_option( Lean_SMTP_Logger::OPTION_LOG_HEADERS );
 		delete_option( Lean_SMTP_Logger::OPTION_LOG_BODY );
+		delete_option( Lean_SMTP_Logger::OPTION_RETENTION );
 		update_option( Lean_SMTP_Logger::OPTION_ENABLED, '1' );
 		Lean_SMTP_Logger::create_table();
 		Lean_SMTP_Logger::clear();
@@ -28,6 +29,7 @@ class Test_Lean_SMTP_Logger extends WP_UnitTestCase {
 		delete_option( Lean_SMTP_Logger::OPTION_ENABLED );
 		delete_option( Lean_SMTP_Logger::OPTION_LOG_HEADERS );
 		delete_option( Lean_SMTP_Logger::OPTION_LOG_BODY );
+		delete_option( Lean_SMTP_Logger::OPTION_RETENTION );
 		Lean_SMTP_Logger::create_table();
 		Lean_SMTP_Logger::clear();
 		parent::tear_down();
@@ -208,5 +210,118 @@ class Test_Lean_SMTP_Logger extends WP_UnitTestCase {
 		$this->log_sample();
 
 		$this->assertSame( [], Lean_SMTP_Logger::recent( 5 ) );
+	}
+
+	// -------------------------------------------------------------------------
+	// Querying — what the Email Log screen reads through
+	// -------------------------------------------------------------------------
+
+	/**
+	 * Three rows: two sent (one to alice), one failed.
+	 */
+	private function log_a_mixed_handful(): void {
+		Lean_SMTP_Logger::log( 'smtp', 'alice@example.com', 'Welcome aboard', Lean_SMTP_Logger::STATUS_SENT );
+		Lean_SMTP_Logger::log( 'smtp', 'bob@example.com', 'Your receipt', Lean_SMTP_Logger::STATUS_SENT );
+		Lean_SMTP_Logger::log( 'ses', 'carol@example.com', 'Password reset', Lean_SMTP_Logger::STATUS_FAILED, 'HTTP 401' );
+	}
+
+	public function test_query_filters_by_status() {
+		$this->log_a_mixed_handful();
+
+		$failed = Lean_SMTP_Logger::query( [ 'status' => Lean_SMTP_Logger::STATUS_FAILED ] );
+
+		$this->assertCount( 1, $failed );
+		$this->assertSame( 'carol@example.com', $failed[0]->to_email );
+		$this->assertSame( 2, Lean_SMTP_Logger::count( [ 'status' => Lean_SMTP_Logger::STATUS_SENT ] ) );
+		$this->assertSame( 3, Lean_SMTP_Logger::count() );
+	}
+
+	public function test_query_searches_recipient_and_subject() {
+		$this->log_a_mixed_handful();
+
+		$this->assertCount( 1, Lean_SMTP_Logger::query( [ 'search' => 'alice@' ] ) );
+		$this->assertCount( 1, Lean_SMTP_Logger::query( [ 'search' => 'receipt' ] ) );
+		$this->assertSame( 0, Lean_SMTP_Logger::count( [ 'search' => 'nobody' ] ) );
+	}
+
+	public function test_search_wildcards_are_escaped_rather_than_matched() {
+		// A bare % in the search box would otherwise match everything.
+		$this->log_a_mixed_handful();
+
+		$this->assertSame( 0, Lean_SMTP_Logger::count( [ 'search' => '%' ] ) );
+	}
+
+	public function test_query_pages_newest_first() {
+		$this->log_a_mixed_handful();
+
+		$first = Lean_SMTP_Logger::query( [ 'per_page' => 2 ] );
+		$next  = Lean_SMTP_Logger::query(
+			[
+				'per_page' => 2,
+				'offset'   => 2,
+			]
+		);
+
+		$this->assertCount( 2, $first );
+		$this->assertCount( 1, $next );
+		$this->assertSame( 'carol@example.com', $first[0]->to_email );
+		$this->assertSame( 'alice@example.com', $next[0]->to_email );
+	}
+
+	public function test_counts_by_status_totals_every_bucket() {
+		$this->log_a_mixed_handful();
+
+		$counts = Lean_SMTP_Logger::counts_by_status();
+
+		$this->assertSame( 3, $counts['all'] );
+		$this->assertSame( 2, $counts[ Lean_SMTP_Logger::STATUS_SENT ] );
+		$this->assertSame( 1, $counts[ Lean_SMTP_Logger::STATUS_FAILED ] );
+	}
+
+	public function test_delete_removes_only_the_given_rows() {
+		$this->log_a_mixed_handful();
+		$rows = Lean_SMTP_Logger::recent();
+
+		$deleted = Lean_SMTP_Logger::delete( [ (int) $rows[0]->id, (int) $rows[2]->id ] );
+
+		$this->assertSame( 2, $deleted );
+		$remaining = Lean_SMTP_Logger::recent();
+		$this->assertCount( 1, $remaining );
+		$this->assertSame( 'bob@example.com', $remaining[0]->to_email );
+	}
+
+	public function test_delete_of_nothing_is_a_no_op() {
+		$this->log_a_mixed_handful();
+
+		$this->assertSame( 0, Lean_SMTP_Logger::delete( [] ) );
+		$this->assertSame( 0, Lean_SMTP_Logger::delete( [ 'not-an-id' ] ) );
+		$this->assertSame( 3, Lean_SMTP_Logger::count() );
+	}
+
+	// -------------------------------------------------------------------------
+	// Retention
+	// -------------------------------------------------------------------------
+
+	public function test_retention_defaults_and_rejects_a_value_outside_the_offered_set() {
+		$this->assertSame( Lean_SMTP_Logger::MAX_ROWS, Lean_SMTP_Logger::retention() );
+
+		update_option( Lean_SMTP_Logger::OPTION_RETENTION, '1000' );
+		$this->assertSame( 1000, Lean_SMTP_Logger::retention() );
+
+		// Anything else — a hand-edited option, a typo in a wp-config.php constant.
+		update_option( Lean_SMTP_Logger::OPTION_RETENTION, '999999' );
+		$this->assertSame( Lean_SMTP_Logger::MAX_ROWS, Lean_SMTP_Logger::retention() );
+	}
+
+	public function test_the_table_is_trimmed_to_the_retention_in_force() {
+		$overshoot = Lean_SMTP_Logger::MAX_ROWS + 5;
+
+		for ( $i = 0; $i < $overshoot; $i++ ) {
+			Lean_SMTP_Logger::log( 'smtp', "rcpt{$i}@example.com", "Message {$i}", Lean_SMTP_Logger::STATUS_SENT );
+		}
+
+		$this->assertSame( Lean_SMTP_Logger::MAX_ROWS, Lean_SMTP_Logger::count() );
+		// The newest survive; the oldest are the ones dropped.
+		$this->assertSame( 'rcpt' . ( $overshoot - 1 ) . '@example.com', Lean_SMTP_Logger::recent( 1 )[0]->to_email );
 	}
 }
