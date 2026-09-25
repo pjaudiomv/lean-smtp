@@ -2,9 +2,9 @@
 Contributors: pjaudiomv
 Tags: smtp, mail, email, ses, wp_mail
 Requires at least: 6.0
-Tested up to: 7.0
+Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 0.4.0
+Stable tag: 0.4.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -97,6 +97,9 @@ The SMTP transport connects only to the host you configure and bundles no third-
 5. Email Log: every send, filtered by result and searchable by recipient or subject, with per-row and bulk delete. When message content is recorded, an entry expands to show the headers, attachment names and body that were sent.
 
 == Changelog ==
+
+= 0.4.1 =
+* Update dependencies.
 
 = 0.4.0 =
 * Lean SMTP now has its own top-level admin menu, with Settings and Email Log as separate screens. The old Settings → Lean SMTP address redirects to the new one, so existing bookmarks keep working.

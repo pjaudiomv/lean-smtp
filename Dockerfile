@@ -1,4 +1,4 @@
-FROM wordpress:7.0-php8.3-apache
+FROM wordpress:7.1.2-php8.4-apache
 
 RUN apt-get update && \
 	apt-get install -y  --no-install-recommends ssl-cert less mariadb-client && \
