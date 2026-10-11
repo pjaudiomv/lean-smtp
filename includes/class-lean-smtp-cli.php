@@ -150,6 +150,12 @@ class Lean_SMTP_CLI {
 					self::secret_row( __( 'Resend API Key', 'lean-smtp' ), Lean_SMTP_Resend::OPTION_API_KEY ),
 				];
 
+			case Lean_SMTP_Mailer::MAILER_GMAIL:
+				return [
+					self::row( __( 'Gmail Send As', 'lean-smtp' ), Lean_SMTP_Gmail::sender(), Lean_SMTP_Gmail::OPTION_SENDER ),
+					self::secret_row( __( 'Gmail Service Account Key', 'lean-smtp' ), Lean_SMTP_Gmail::OPTION_SERVICE_ACCOUNT ),
+				];
+
 			case Lean_SMTP_Mailer::MAILER_OFFLINE:
 				// Nothing to configure — mail is recorded, never sent.
 				return [];

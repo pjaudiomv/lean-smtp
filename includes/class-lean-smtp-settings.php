@@ -154,6 +154,9 @@ class Lean_SMTP_Settings {
 
 		register_setting( self::GROUP, Lean_SMTP_Resend::OPTION_API_KEY, [ 'sanitize_callback' => [ static::class, 'sanitize_resend_key' ] ] );
 
+		register_setting( self::GROUP, Lean_SMTP_Gmail::OPTION_SERVICE_ACCOUNT, [ 'sanitize_callback' => [ static::class, 'sanitize_gmail_key' ] ] );
+		register_setting( self::GROUP, Lean_SMTP_Gmail::OPTION_SENDER, [ 'sanitize_callback' => 'sanitize_email' ] );
+
 		register_setting( self::GROUP, Lean_SMTP_Logger::OPTION_ENABLED, [ 'sanitize_callback' => 'absint' ] );
 		register_setting( self::GROUP, Lean_SMTP_Logger::OPTION_LOG_HEADERS, [ 'sanitize_callback' => 'absint' ] );
 		register_setting( self::GROUP, Lean_SMTP_Logger::OPTION_LOG_BODY, [ 'sanitize_callback' => 'absint' ] );
@@ -234,6 +237,10 @@ class Lean_SMTP_Settings {
 
 	public static function sanitize_resend_key( $value ): string {
 		return self::sanitize_secret( $value, Lean_SMTP_Resend::OPTION_API_KEY );
+	}
+
+	public static function sanitize_gmail_key( $value ): string {
+		return self::sanitize_secret( $value, Lean_SMTP_Gmail::OPTION_SERVICE_ACCOUNT );
 	}
 
 	/**
@@ -362,6 +369,27 @@ class Lean_SMTP_Settings {
 		self::lock_note( $option );
 	}
 
+	/**
+	 * A multi-line secret (a pasted key file). Like secret_field() it never
+	 * echoes the stored value back — the textarea renders empty, and a blank
+	 * submission keeps whatever is stored.
+	 */
+	private static function secret_textarea_field( string $option, string $description = '', string $placeholder = '' ): void {
+		if ( '' === $placeholder && Lean_SMTP_Config::has_secret( $option ) ) {
+			$placeholder = __( '••••••••  (saved — leave blank to keep)', 'lean-smtp' );
+		}
+		?>
+		<textarea id="<?php echo esc_attr( $option ); ?>" name="<?php echo esc_attr( $option ); ?>"
+			class="large-text code" rows="6" autocomplete="off" spellcheck="false"
+			placeholder="<?php echo esc_attr( $placeholder ); ?>"
+			<?php disabled( Lean_SMTP_Config::is_constant( $option ) ); ?>></textarea>
+		<?php if ( '' !== $description ) : ?>
+			<p class="description"><?php echo esc_html( $description ); ?></p>
+		<?php endif; ?>
+		<?php
+		self::lock_note( $option );
+	}
+
 	private static function checkbox_field( string $option, string $label, bool $default = false ): void {
 		$locked = Lean_SMTP_Config::is_constant( $option );
 		?>
@@ -415,6 +443,7 @@ class Lean_SMTP_Settings {
 			Lean_SMTP_Mailer::MAILER_SES     => __( 'Amazon SES', 'lean-smtp' ),
 			Lean_SMTP_Mailer::MAILER_MAILGUN => __( 'Mailgun', 'lean-smtp' ),
 			Lean_SMTP_Mailer::MAILER_RESEND  => __( 'Resend', 'lean-smtp' ),
+			Lean_SMTP_Mailer::MAILER_GMAIL   => __( 'Gmail / Google Workspace', 'lean-smtp' ),
 			Lean_SMTP_Mailer::MAILER_OFFLINE => __( 'Offline', 'lean-smtp' ),
 		];
 	}
@@ -501,6 +530,7 @@ class Lean_SMTP_Settings {
 			Lean_SMTP_Mailer::MAILER_SES     => __( 'API', 'lean-smtp' ),
 			Lean_SMTP_Mailer::MAILER_MAILGUN => __( 'API', 'lean-smtp' ),
 			Lean_SMTP_Mailer::MAILER_RESEND  => __( 'API', 'lean-smtp' ),
+			Lean_SMTP_Mailer::MAILER_GMAIL   => __( 'API', 'lean-smtp' ),
 			Lean_SMTP_Mailer::MAILER_OFFLINE => __( 'Staging', 'lean-smtp' ),
 		];
 		?>
@@ -727,6 +757,34 @@ class Lean_SMTP_Settings {
 						<tr>
 							<th scope="row"><label for="<?php echo esc_attr( Lean_SMTP_Resend::OPTION_API_KEY ); ?>"><?php esc_html_e( 'API Key', 'lean-smtp' ); ?></label></th>
 							<td><?php self::secret_field( Lean_SMTP_Resend::OPTION_API_KEY, __( 'A Resend API key with send permission (re_…). Stored encrypted; leave blank to keep the current key.', 'lean-smtp' ) ); ?></td>
+						</tr>
+					</table>
+				</div>
+
+				<div class="lsmtp-card lsmtp-section" data-mailer="gmail">
+					<h2><?php esc_html_e( 'Gmail / Google Workspace', 'lean-smtp' ); ?></h2>
+					<p class="description">
+						<?php esc_html_e( 'For Google Workspace domains only — not consumer @gmail.com accounts. Create a service account in Google Cloud, enable the Gmail API, and have a Workspace Super Admin authorise its client ID for the gmail.send scope under domain-wide delegation in the Admin Console.', 'lean-smtp' ); ?>
+					</p>
+					<table class="form-table" role="presentation">
+						<tr>
+							<th scope="row"><label for="<?php echo esc_attr( Lean_SMTP_Gmail::OPTION_SENDER ); ?>"><?php esc_html_e( 'Send As', 'lean-smtp' ); ?></label></th>
+							<td>
+								<?php
+								self::text_field(
+									Lean_SMTP_Gmail::OPTION_SENDER,
+									[
+										'type'        => 'email',
+										'placeholder' => 'you@example.com',
+										'description' => __( 'The Workspace mailbox mail is sent from and on whose behalf the service account acts. Your From address should match this address (or an alias it is allowed to send as), or Google will reject the message.', 'lean-smtp' ),
+									]
+								);
+								?>
+							</td>
+						</tr>
+						<tr>
+							<th scope="row"><label for="<?php echo esc_attr( Lean_SMTP_Gmail::OPTION_SERVICE_ACCOUNT ); ?>"><?php esc_html_e( 'Service Account Key', 'lean-smtp' ); ?></label></th>
+							<td><?php self::secret_textarea_field( Lean_SMTP_Gmail::OPTION_SERVICE_ACCOUNT, __( 'Paste the entire service-account key JSON file from Google Cloud. Stored encrypted; leave blank to keep the current key.', 'lean-smtp' ) ); ?></td>
 						</tr>
 					</table>
 				</div>

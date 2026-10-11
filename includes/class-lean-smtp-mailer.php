@@ -48,6 +48,7 @@ class Lean_SMTP_Mailer {
 	const MAILER_SES     = 'ses';
 	const MAILER_MAILGUN = 'mailgun';
 	const MAILER_RESEND  = 'resend';
+	const MAILER_GMAIL   = 'gmail';
 	const MAILER_OFFLINE = 'offline';
 
 	/**
@@ -62,6 +63,7 @@ class Lean_SMTP_Mailer {
 			self::MAILER_SES     => 'Lean_SMTP_SES',
 			self::MAILER_MAILGUN => 'Lean_SMTP_Mailgun',
 			self::MAILER_RESEND  => 'Lean_SMTP_Resend',
+			self::MAILER_GMAIL   => 'Lean_SMTP_Gmail',
 		];
 	}
 
