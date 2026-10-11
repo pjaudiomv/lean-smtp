@@ -2,8 +2,8 @@
 /**
  * Plugin Name: Lean SMTP
  * Plugin URI: https://github.com/pjaudiomv/lean-smtp
- * Description: Free, no upsells, no telemetry. Routes wp_mail() through an SMTP server or the Amazon SES, Mailgun, or Resend API, with From identity and Reply-To control, wp-config.php overrides, failure alerts, WP-CLI commands, a test-email button, an offline mode for staging, and optional send logging.
- * Version: 0.4.1
+ * Description: Free, no upsells, no telemetry. Routes wp_mail() through an SMTP server or the Amazon SES, Mailgun, Resend, or Gmail / Google Workspace API, with From identity and Reply-To control, wp-config.php overrides, failure alerts, WP-CLI commands, a test-email button, an offline mode for staging, and optional send logging.
+ * Version: 0.5.0
  * Author: pjaudiomv
  * License: GPL v2 or later
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -14,7 +14,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'LEAN_SMTP_VERSION', '0.4.0' );
+define( 'LEAN_SMTP_VERSION', '0.5.0' );
 define( 'LEAN_SMTP_FILE', __FILE__ );
 define( 'LEAN_SMTP_DIR', plugin_dir_path( __FILE__ ) );
 define( 'LEAN_SMTP_URL', plugin_dir_url( __FILE__ ) );
@@ -27,6 +27,7 @@ require_once LEAN_SMTP_DIR . 'includes/trait-lean-smtp-mime.php';
 require_once LEAN_SMTP_DIR . 'includes/class-lean-smtp-ses.php';
 require_once LEAN_SMTP_DIR . 'includes/class-lean-smtp-mailgun.php';
 require_once LEAN_SMTP_DIR . 'includes/class-lean-smtp-resend.php';
+require_once LEAN_SMTP_DIR . 'includes/class-lean-smtp-gmail.php';
 require_once LEAN_SMTP_DIR . 'includes/class-lean-smtp-mailer.php';
 require_once LEAN_SMTP_DIR . 'includes/class-lean-smtp-notices.php';
 require_once LEAN_SMTP_DIR . 'includes/class-lean-smtp-settings.php';

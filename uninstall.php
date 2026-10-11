@@ -31,6 +31,8 @@ $lean_smtp_options = [
 	'lean_smtp_mailgun_region',
 	'lean_smtp_mailgun_api_key',
 	'lean_smtp_resend_api_key',
+	'lean_smtp_gmail_service_account',
+	'lean_smtp_gmail_sender',
 	'lean_smtp_logging_enabled',
 	'lean_smtp_log_headers',
 	'lean_smtp_log_body',
@@ -47,5 +49,13 @@ foreach ( $lean_smtp_options as $lean_smtp_option ) {
 delete_metadata( 'user', 0, 'lean_smtp_log_per_page', '', true );
 
 global $wpdb;
+
+// The Gmail transport caches short-lived access tokens in transients keyed by a
+// hash of the credentials, so they are removed by prefix rather than by name.
+$lean_smtp_transient_like = $wpdb->esc_like( '_transient_lean_smtp_gmail_token_' ) . '%';
+$lean_smtp_timeout_like   = $wpdb->esc_like( '_transient_timeout_lean_smtp_gmail_token_' ) . '%';
+// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+$wpdb->query( $wpdb->prepare( "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s", $lean_smtp_transient_like, $lean_smtp_timeout_like ) );
+
 // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.DirectDatabaseQuery.SchemaChange
 $wpdb->query( "DROP TABLE IF EXISTS {$wpdb->prefix}lean_smtp_log" );

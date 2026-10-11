@@ -100,7 +100,10 @@ Keep the shared assembly shared:
    `Lean_SMTP_CLI::mailer_rows()`.
 4. Add its options to `uninstall.php`.
 5. Never let a `Bcc` header reach the wire — carry those recipients in the
-   provider's envelope (see `strip_bcc_header()`).
+   provider's envelope (see `strip_bcc_header()`). The exception is a provider
+   that consumes `Bcc` itself like a real mail client (Gmail does): leave the
+   header in place and verify against a live send, since it has no envelope to
+   carry those recipients separately.
 
 ### Changing the send-log table
 
