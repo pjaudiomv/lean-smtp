@@ -24,7 +24,7 @@ Every provider below also offers plain SMTP, so the SMTP transport alone covers 
 * **Amazon SES (API)**: the SES v2 API, signed with a hand-rolled AWS Signature V4 signer, so no AWS SDK is bundled.
 * **Mailgun (API)**: US or EU region, sending the message as MIME so attachments and formatting survive untouched.
 * **Resend (API)**: a single API key, nothing else to configure.
-* **Gmail / Google Workspace (API)**: for Workspace domains, authenticated with a service account using domain-wide delegation — no OAuth consent screen, no refresh tokens, no bundled Google SDK. The plugin signs a short-lived JWT with the service account's key and sends through the Gmail API. (Consumer @gmail.com accounts are not supported; use SMTP with an App Password for those.)
+* **Gmail / Google Workspace (API)**: for Workspace domains, with two ways to authenticate. A **service account** with domain-wide delegation (a short-lived JWT signed in-plugin, no consent screen and no refresh tokens), or **OAuth2** where you authorize a single mailbox in the browser instead of needing a Super Admin to set up delegation. Either way the plugin sends through the Gmail API with no bundled Google SDK. (Consumer @gmail.com accounts are not supported; use SMTP with an App Password for those.)
 * **Offline**: record every message and send nothing, for staging sites that must never mail real customers. wp_mail() still reports success, so plugins behave exactly as they would in production.
 * **From identity**: set the From name and address, and optionally force them over anything another plugin sets.
 * **Reply-To**: a site-wide default for replies, useful when the From address is a no-reply. A Reply-To the message set itself is always kept.
@@ -35,7 +35,7 @@ Every provider below also offers plain SMTP, so the SMTP transport alone covers 
 * **Send log**: optional. Records each send (recipient, subject, result) on an Email Log screen with paging, a status filter, search, and per-row or bulk delete. Stored in your own database and never sent anywhere. The message headers, attachment filenames and body can each be recorded too, behind their own settings and off by default.
 * **Encrypted secrets**: stored passwords and API keys are AES-256 encrypted, keyed to your site salts.
 
-Deliberately not included: consumer-Gmail and Microsoft 365 OAuth (the authorization-code flow). It needs an OAuth consent screen, refresh-token storage, and app verification — more machinery than the rest of this plugin combined. The Gmail support that does ship uses a Workspace service account with domain-wide delegation instead, which needs none of that; for a consumer @gmail.com account, use SMTP with an app password.
+Deliberately not included: consumer-Gmail and Microsoft 365 OAuth. Using the `gmail.send` scope with a consumer (external) app would require Google's app-verification / security-assessment process, or it hands out refresh tokens that expire after a week — more machinery than the rest of this plugin combined. The Workspace OAuth that does ship sidesteps that because it uses an Internal consent screen, which needs no verification and issues lasting refresh tokens. For a consumer @gmail.com account, use SMTP with an app password.
 
 == Installation ==
 
@@ -51,7 +51,9 @@ For Mailgun: use the sending domain exactly as it appears in your Mailgun dashbo
 
 For Resend: create an API key with send permission and verify your From domain.
 
-For Gmail / Google Workspace: in Google Cloud, create a service account and enable the Gmail API, then have a Workspace Super Admin authorise the service account's client ID for the `https://www.googleapis.com/auth/gmail.send` scope under Security → Access and data control → API controls → Domain-wide delegation. Paste the downloaded JSON key into the Service Account Key field and set "Send As" to the Workspace mailbox mail should come from. This works for Workspace domains only, not consumer @gmail.com accounts.
+For Gmail / Google Workspace (service account): in Google Cloud, create a service account and enable the Gmail API, then have a Workspace Super Admin authorize the service account's client ID for the `https://www.googleapis.com/auth/gmail.send` scope under Security → Access and data control → API controls → Domain-wide delegation. Paste the downloaded JSON key into the Service Account Key field and set "Send As" to the Workspace mailbox mail should come from. This works for Workspace domains only, not consumer @gmail.com accounts.
+
+For Gmail / Google Workspace (OAuth): in Google Cloud, enable the Gmail API, set the OAuth consent screen's user type to Internal, and create an OAuth client ID of type "Web application". Copy the Redirect URI shown in the plugin into that client's Authorized redirect URIs (it must match exactly), then paste the client ID and secret into the plugin and click Connect to authorize the mailbox mail should come from. Workspace domains only; a Super Admin delegation step is not needed.
 
 == Frequently Asked Questions ==
 
@@ -98,7 +100,7 @@ The SMTP transport connects only to the host you configure and bundles no third-
 2. Amazon SES: region and IAM access key. The secret key is stored encrypted and never shown.
 3. Mailgun: sending domain, US/EU region, and API key.
 4. Resend: a single API key.
-5. Gmail / Google Workspace: the sender mailbox and the service-account key, which is stored encrypted and never shown.
+5. Gmail / Google Workspace: the sender mailbox and either the service-account key or the OAuth client secret and refresh token, all stored encrypted and never shown.
 6. Email Log: every send, filtered by result and searchable by recipient or subject, with per-row and bulk delete. When message content is recorded, an entry expands to show the headers, attachment names and body that were sent.
 
 == Changelog ==
