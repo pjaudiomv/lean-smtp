@@ -11,10 +11,15 @@
  * AWS Signature V4.
  *
  * Workspace only: the impersonated sender must be a real mailbox in a Google
- * Workspace domain whose Super Admin has authorised the service account's
+ * Workspace domain whose Super Admin has authorized the service account's
  * client ID for the gmail.send scope in the Admin Console. It does nothing for
- * consumer @gmail.com accounts — those need the full OAuth flow, a deliberate
- * non-goal.
+ * consumer @gmail.com accounts. The sibling Lean_SMTP_Gmail_OAuth transport is
+ * the per-mailbox alternative for admins who can't grant domain-wide
+ * delegation; it is likewise Workspace-only. Consumer @gmail.com — which would
+ * need an externally-verified OAuth app — remains a deliberate non-goal.
+ *
+ * The send path (base64url + messages.send, Bcc left in place) is shared with
+ * that OAuth transport through the Lean_SMTP_Gmail_Send trait.
  *
  * The signer (`jwt_assertion`) is pure and deterministic given an explicit
  * timestamp, so it is verified in the unit suite without a network call.
@@ -27,6 +32,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 class Lean_SMTP_Gmail implements Lean_SMTP_Api_Transport {
+
+	use Lean_SMTP_Gmail_Send;
 
 	const OPTION_SERVICE_ACCOUNT = 'lean_smtp_gmail_service_account';
 	const OPTION_SENDER          = 'lean_smtp_gmail_sender';
@@ -90,14 +97,6 @@ class Lean_SMTP_Gmail implements Lean_SMTP_Api_Transport {
 		}
 
 		return $signing_input . '.' . self::base64url( $signature );
-	}
-
-	/**
-	 * URL-safe base64 without padding, per the JWT / base64url spec. Gmail's
-	 * raw-message field wants the same encoding.
-	 */
-	public static function base64url( string $data ): string {
-		return rtrim( strtr( base64_encode( $data ), '+/', '-_' ), '=' );
 	}
 
 	// -------------------------------------------------------------------------
@@ -220,43 +219,5 @@ class Lean_SMTP_Gmail implements Lean_SMTP_Api_Transport {
 		set_transient( $cache_key, $token, max( 1, $expires_in - self::TOKEN_MARGIN ) );
 
 		return $token;
-	}
-
-	/**
-	 * POST the raw MIME to the Gmail send endpoint for the impersonated user.
-	 *
-	 * @return string|WP_Error The Gmail message id (may be '') on success, or a WP_Error.
-	 */
-	private static function send_message( string $token, string $raw_mime ) {
-		$endpoint = sprintf( self::SEND_ENDPOINT, rawurlencode( self::sender() ) );
-
-		$response = wp_remote_post(
-			$endpoint,
-			[
-				'timeout' => 15,
-				'headers' => [
-					'Authorization' => 'Bearer ' . $token,
-					'Content-Type'  => 'application/json',
-				],
-				'body'    => wp_json_encode( [ 'raw' => self::base64url( $raw_mime ) ] ),
-			]
-		);
-
-		if ( is_wp_error( $response ) ) {
-			return $response;
-		}
-
-		$code = (int) wp_remote_retrieve_response_code( $response );
-		$body = json_decode( (string) wp_remote_retrieve_body( $response ), true );
-		if ( $code >= 200 && $code < 300 ) {
-			return is_array( $body ) && ! empty( $body['id'] ) ? (string) $body['id'] : '';
-		}
-
-		$message = is_array( $body ) && isset( $body['error']['message'] ) && '' !== $body['error']['message']
-			? (string) $body['error']['message']
-			: wp_remote_retrieve_response_message( $response );
-
-		/* translators: 1: HTTP status code, 2: Gmail error message. */
-		return new WP_Error( 'lean_smtp_gmail_http_' . $code, sprintf( __( 'Gmail rejected the message (HTTP %1$d): %2$s', 'lean-smtp' ), $code, $message ) );
 	}
 }

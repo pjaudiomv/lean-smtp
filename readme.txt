@@ -104,6 +104,7 @@ The SMTP transport connects only to the host you configure and bundles no third-
 == Changelog ==
 
 = 0.6.0 =
+* Added a second Gmail / Google Workspace transport that authenticates with OAuth2 instead of a service account. You authorize one mailbox in the browser rather than needing a Super Admin to set up domain-wide delegation. Create an OAuth client in Google Cloud with the consent screen set to Internal, paste its ID and secret, and click Connect. Workspace domains only — consumer @gmail.com is not supported.
 * The send log now shows the provider's message ID for each API send, which helps when tracing a message with your provider.
 * The send log can now expire entries by age (7, 30, 90 or 365 days) in addition to the existing row-count limit, so old message content doesn't linger. Off by default.
 * Inline images now work when sending through Amazon SES, Mailgun, Resend and Gmail..
