@@ -4,7 +4,7 @@ Tags: smtp, mail, email, ses, wp_mail
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 0.5.0
+Stable tag: 0.6.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -102,6 +102,11 @@ The SMTP transport connects only to the host you configure and bundles no third-
 6. Email Log: every send, filtered by result and searchable by recipient or subject, with per-row and bulk delete. When message content is recorded, an entry expands to show the headers, attachment names and body that were sent.
 
 == Changelog ==
+
+= 0.6.0 =
+* The send log now shows the provider's message ID for each API send, which helps when tracing a message with your provider.
+* The send log can now expire entries by age (7, 30, 90 or 365 days) in addition to the existing row-count limit, so old message content doesn't linger. Off by default.
+* Inline images now work when sending through Amazon SES, Mailgun, Resend and Gmail..
 
 = 0.5.0 =
 * Added a Gmail / Google Workspace transport (API). Authenticates as a service account with domain-wide delegation — a JWT signed in-plugin and exchanged for a short-lived access token, with no OAuth consent flow, no refresh tokens and no bundled Google SDK — and sends through the Gmail API. Workspace domains only.

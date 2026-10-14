@@ -15,6 +15,23 @@ class Test_Lean_SMTP_Resend extends WP_UnitTestCase {
 		parent::tear_down();
 	}
 
+	/**
+	 * Send through the real wp_mail() pipeline, so the pre_wp_mail hook wiring is
+	 * exercised and not just send_via_api() in isolation. init() is idempotent:
+	 * WordPress dedupes the identical static callbacks it adds.
+	 */
+	private function wp_mail_send( array $atts ) {
+		Lean_SMTP_Mailer::init();
+		return wp_mail(
+			$atts['to'] ?? '',
+			(string) ( $atts['subject'] ?? '' ),
+			$atts['message'] ?? '',
+			$atts['headers'] ?? '',
+			$atts['attachments'] ?? [],
+			$atts['embeds'] ?? []
+		);
+	}
+
 	private function configure_resend() {
 		update_option( Lean_SMTP_Mailer::OPTION_MAILER, Lean_SMTP_Mailer::MAILER_RESEND );
 		update_option( Lean_SMTP_Resend::OPTION_API_KEY, Lean_SMTP_Crypto::encrypt( 're_test_key' ) );
@@ -46,7 +63,7 @@ class Test_Lean_SMTP_Resend extends WP_UnitTestCase {
 		$captured = [];
 		$this->capture_request( $captured );
 
-		$ok = Lean_SMTP_Mailer::send_via_api( null, $atts );
+		$ok = $this->wp_mail_send( $atts );
 		$this->assertTrue( $ok );
 
 		$this->assertSame( 'https://api.resend.com/emails', $captured['url'] );
@@ -98,6 +115,60 @@ class Test_Lean_SMTP_Resend extends WP_UnitTestCase {
 		);
 
 		$this->assertSame( '<p>Rich body</p>', $payload['html'] );
+	}
+
+	public function test_html_with_a_plain_text_alternative_sends_both_bodies() {
+		// When another plugin sets AltBody, PHPMailer's preSend() rewrites
+		// ContentType to multipart/alternative. The HTML Body must still map to
+		// Resend's `html` field (not be shipped as plain text) and the AltBody to
+		// `text`.
+		$this->configure_resend();
+
+		add_action(
+			'phpmailer_init',
+			function ( $phpmailer ) {
+				$phpmailer->AltBody = 'Plain alternative';
+			}
+		);
+
+		$payload = $this->send(
+			[
+				'to'          => 'rcpt@example.com',
+				'subject'     => 'Hello',
+				'message'     => '<p>Rich body</p>',
+				'headers'     => 'Content-Type: text/html',
+				'attachments' => [],
+			]
+		);
+
+		$this->assertSame( '<p>Rich body</p>', $payload['html'] );
+		$this->assertSame( 'Plain alternative', $payload['text'] );
+	}
+
+	public function test_inline_embeds_become_attachments_with_a_content_id() {
+		// The sixth wp_mail() argument (embeds, WordPress 6.9+). Resend carries an
+		// inline image as an attachment tagged with its content_id.
+		$this->configure_resend();
+
+		$image = wp_tempnam( 'lean-smtp-embed' );
+		file_put_contents( $image, 'PNGDATA' );
+
+		$payload = $this->send(
+			[
+				'to'          => 'rcpt@example.com',
+				'subject'     => 'Hello',
+				'message'     => '<p>See <img src="cid:logo"></p>',
+				'headers'     => 'Content-Type: text/html',
+				'attachments' => [],
+				'embeds'      => [ 'logo' => $image ],
+			]
+		);
+
+		unlink( $image );
+
+		$this->assertCount( 1, $payload['attachments'] );
+		$this->assertSame( 'logo', $payload['attachments'][0]['content_id'] );
+		$this->assertSame( 'PNGDATA', base64_decode( $payload['attachments'][0]['content'] ) );
 	}
 
 	public function test_recipients_and_headers_are_carried_over() {
@@ -175,8 +246,7 @@ class Test_Lean_SMTP_Resend extends WP_UnitTestCase {
 			}
 		);
 
-		$ok = Lean_SMTP_Mailer::send_via_api(
-			null,
+		$ok = $this->wp_mail_send(
 			[
 				'to'          => 'rcpt@example.com',
 				'subject'     => 'Hello',

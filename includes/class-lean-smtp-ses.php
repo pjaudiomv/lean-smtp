@@ -145,7 +145,7 @@ class Lean_SMTP_SES implements Lean_SMTP_Api_Transport {
 	 * instead — leaving every other send on the unchanged, header-derived path.
 	 *
 	 * @param PHPMailer\PHPMailer\PHPMailer $phpmailer Assembled, `preSend()` already called.
-	 * @return true|WP_Error
+	 * @return string|WP_Error The provider message id (may be '') on success, or a WP_Error.
 	 */
 	public static function send( PHPMailer\PHPMailer\PHPMailer $phpmailer ) {
 		$bcc = self::addresses( $phpmailer->getBccAddresses() );
@@ -189,7 +189,7 @@ class Lean_SMTP_SES implements Lean_SMTP_Api_Transport {
 	 * @param array    $destination Optional SES Destination (To/Cc/BccAddresses).
 	 *                              When given, SES uses it for the envelope
 	 *                              instead of reading the message headers.
-	 * @return true|WP_Error True on success, WP_Error describing the failure.
+	 * @return string|WP_Error The SES MessageId (may be '') on success, WP_Error describing the failure.
 	 */
 	public static function send_raw_email( string $raw_mime, array $destination = [] ) {
 		$region = self::region();
@@ -253,11 +253,11 @@ class Lean_SMTP_SES implements Lean_SMTP_Api_Transport {
 		}
 
 		$code = (int) wp_remote_retrieve_response_code( $response );
+		$body = json_decode( (string) wp_remote_retrieve_body( $response ), true );
 		if ( $code >= 200 && $code < 300 ) {
-			return true;
+			return is_array( $body ) && ! empty( $body['MessageId'] ) ? (string) $body['MessageId'] : '';
 		}
 
-		$body    = json_decode( (string) wp_remote_retrieve_body( $response ), true );
 		$message = is_array( $body ) && ! empty( $body['message'] ) ? (string) $body['message'] : wp_remote_retrieve_response_message( $response );
 
 		/* translators: 1: HTTP status code, 2: SES error message. */

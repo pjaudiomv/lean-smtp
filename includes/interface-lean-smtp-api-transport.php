@@ -38,8 +38,13 @@ interface Lean_SMTP_Api_Transport {
 	/**
 	 * Deliver an assembled message.
 	 *
+	 * On success return the provider's message id — the identifier the API hands
+	 * back for the accepted message (SES `MessageId`, the `id` the others return)
+	 * — or '' when the provider gives none. The mailer treats any non-WP_Error
+	 * return as success and records the id in the send log.
+	 *
 	 * @param PHPMailer\PHPMailer\PHPMailer $phpmailer Fully populated, `preSend()` already called.
-	 * @return true|WP_Error True when the provider accepted the message.
+	 * @return string|WP_Error The provider's message id (may be '') when accepted.
 	 */
 	public static function send( PHPMailer\PHPMailer\PHPMailer $phpmailer );
 }

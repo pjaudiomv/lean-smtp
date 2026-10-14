@@ -256,7 +256,13 @@ class Lean_SMTP_Mailer {
 	 * @param array     $atts          to, subject, message, headers, attachments.
 	 */
 	public static function send_offline( $short_circuit, array $atts ): bool {
-		$atts = apply_filters( 'wp_mail', $atts ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Deliberately re-applying a WordPress core mail hook.
+		// Respect an earlier pre_wp_mail short-circuit: if another filter already
+		// answered wp_mail(), hand that decision straight back rather than logging
+		// a send on top of it. Core has already applied the `wp_mail` filter to
+		// $atts before this point, so we must not apply it a second time.
+		if ( null !== $short_circuit ) {
+			return $short_circuit;
+		}
 
 		$to      = $atts['to'] ?? '';
 		$subject = (string) ( $atts['subject'] ?? '' );
@@ -335,13 +341,21 @@ class Lean_SMTP_Mailer {
 	 * @return bool Whether the message was accepted by the provider.
 	 */
 	public static function send_via_api( $short_circuit, array $atts ): bool {
-		$atts = apply_filters( 'wp_mail', $atts ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Deliberately re-applying a WordPress core mail hook.
+		// Respect an earlier pre_wp_mail short-circuit: if another filter already
+		// answered wp_mail() (cancelling it, or having sent it itself), hand that
+		// decision back without contacting the provider. Core has already applied
+		// the `wp_mail` filter to $atts before this point, so we must not apply it
+		// a second time.
+		if ( null !== $short_circuit ) {
+			return $short_circuit;
+		}
 
 		$to          = $atts['to'] ?? '';
 		$subject     = (string) ( $atts['subject'] ?? '' );
 		$message     = $atts['message'] ?? '';
 		$headers     = $atts['headers'] ?? '';
 		$attachments = $atts['attachments'] ?? [];
+		$embeds      = $atts['embeds'] ?? [];
 
 		if ( ! is_array( $to ) ) {
 			$to = explode( ',', $to );
@@ -351,13 +365,15 @@ class Lean_SMTP_Mailer {
 		}
 
 		// Snapshot the arguments as they arrived, for the wp_mail_succeeded /
-		// wp_mail_failed payload — header parsing below rewrites $headers.
+		// wp_mail_failed payload — header parsing below rewrites $headers. Matches
+		// core's own payload, which carries embeds from WordPress 6.9 onward.
 		$mail_data = [
 			'to'          => $to,
 			'subject'     => $subject,
 			'message'     => $message,
 			'headers'     => $headers,
 			'attachments' => $attachments,
+			'embeds'      => $embeds,
 		];
 
 		// --- Parse headers into structured pieces (faithful to core). --------
@@ -532,6 +548,36 @@ class Lean_SMTP_Mailer {
 			}
 		}
 
+		// Inline images (the sixth wp_mail() argument, added in WordPress 6.9).
+		// Ported from core so a `cid:` reference in the body keeps its image on
+		// every API transport, with the same `wp_mail_embed_args` filter.
+		foreach ( (array) $embeds as $key => $embed_path ) {
+			$embed_args = apply_filters( // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Deliberately re-applying a WordPress core mail hook.
+				'wp_mail_embed_args',
+				[
+					'path'        => $embed_path,
+					'cid'         => (string) $key,
+					'name'        => basename( $embed_path ),
+					'encoding'    => 'base64',
+					'type'        => '',
+					'disposition' => 'inline',
+				]
+			);
+
+			try {
+				$phpmailer->addEmbeddedImage(
+					$embed_args['path'],
+					$embed_args['cid'],
+					$embed_args['name'],
+					$embed_args['encoding'],
+					$embed_args['type'],
+					$embed_args['disposition']
+				);
+			} catch ( PHPMailer\PHPMailer\Exception $e ) {
+				continue;
+			}
+		}
+
 		// Let other plugins tweak the message, exactly as core does.
 		do_action_ref_array( 'phpmailer_init', [ &$phpmailer ] ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Deliberately re-firing a WordPress core mail hook.
 
@@ -557,6 +603,11 @@ class Lean_SMTP_Mailer {
 		if ( is_wp_error( $result ) ) {
 			return self::fail_api( $mail_data, $result->get_error_message() );
 		}
+
+		// Carry the provider's message id (SES MessageId, the `id` the others
+		// return) into the success payload, so the logger can record it for
+		// delivery tracing. It is our own key on an otherwise core-shaped payload.
+		$mail_data['lean_smtp_message_id'] = is_string( $result ) ? $result : '';
 
 		// Log through the same wp_mail_succeeded hook the SMTP path uses, so a
 		// send is recorded exactly once. Core doesn't fire this when pre_wp_mail
@@ -626,9 +677,14 @@ class Lean_SMTP_Mailer {
 	/**
 	 * Send a test message to $to using the currently-configured transport.
 	 *
+	 * With $rich, send an HTML message carrying an attachment and an inline image
+	 * too, which surfaces message-format problems a plain-text test cannot — a
+	 * provider that mangles HTML, drops attachments, or breaks `cid:` embeds.
+	 *
+	 * @param bool $rich Send the HTML + attachment + inline-image variant.
 	 * @return true|WP_Error
 	 */
-	public static function send_test( string $to ) {
+	public static function send_test( string $to, bool $rich = false ) {
 		if ( ! is_email( $to ) ) {
 			return new WP_Error( 'lean_smtp_bad_recipient', __( 'Please enter a valid recipient email address.', 'lean-smtp' ) );
 		}
@@ -641,12 +697,13 @@ class Lean_SMTP_Mailer {
 
 		/* translators: %s: site name. */
 		$subject = sprintf( __( 'Lean SMTP test email from %s', 'lean-smtp' ), get_bloginfo( 'name' ) );
-		$body    = __( 'This is a test email sent by the Lean SMTP plugin. If you received it, your mail settings are working.', 'lean-smtp' );
 
 		// A deliberate test reports its own result inline; it shouldn't also
 		// raise the background "mail is failing" notice.
 		Lean_SMTP_Notices::suspend();
-		$ok = wp_mail( $to, $subject, $body );
+		$ok = $rich
+			? self::send_rich_test( $to, $subject )
+			: wp_mail( $to, $subject, __( 'This is a test email sent by the Lean SMTP plugin. If you received it, your mail settings are working.', 'lean-smtp' ) );
 		Lean_SMTP_Notices::resume();
 
 		remove_action( 'wp_mail_failed', $capture );
@@ -658,5 +715,67 @@ class Lean_SMTP_Mailer {
 		return $captured instanceof WP_Error
 			? $captured
 			: new WP_Error( 'lean_smtp_test_failed', __( 'The test email could not be sent. Check your settings and your host\'s outbound mail.', 'lean-smtp' ) );
+	}
+
+	/**
+	 * The HTML test variant: an HTML body, a small text attachment and a 1×1
+	 * inline PNG referenced from the body by `cid:`. The two files are written to
+	 * the system temp directory and removed once wp_mail() has read them.
+	 *
+	 * The inline image rides in wp_mail()'s sixth argument (embeds), added in
+	 * WordPress 6.9; on older cores that argument is ignored and the image simply
+	 * doesn't embed, while the HTML and attachment are still exercised.
+	 */
+	private static function send_rich_test( string $to, string $subject ): bool {
+		$dir    = get_temp_dir();
+		$suffix = wp_generate_password( 8, false );
+		$text   = $dir . 'lean-smtp-test-' . $suffix . '.txt';
+		$image  = $dir . 'lean-smtp-test-' . $suffix . '.png';
+
+		// A 1×1 transparent PNG.
+		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode -- Decoding a fixed, known test pixel, not obfuscation.
+		$png = base64_decode( 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==' );
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- Writing a short-lived local test file; WP_Filesystem is not initialised during mail.
+		$has_text = false !== file_put_contents( $text, __( 'This is a test attachment sent by the Lean SMTP plugin.', 'lean-smtp' ) );
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- As above.
+		$has_image = false !== file_put_contents( $image, $png );
+
+		$attachments = $has_text ? [ $text ] : [];
+		$embeds      = $has_image ? [ 'lean-smtp-logo' => $image ] : [];
+
+		$ok = wp_mail(
+			$to,
+			$subject,
+			self::rich_test_body(),
+			[ 'Content-Type: text/html; charset=UTF-8' ],
+			$attachments,
+			$embeds
+		);
+
+		if ( $has_text ) {
+			wp_delete_file( $text );
+		}
+		if ( $has_image ) {
+			wp_delete_file( $image );
+		}
+
+		return (bool) $ok;
+	}
+
+	/**
+	 * HTML body for the rich test, referencing the inline image by its `cid:`.
+	 */
+	private static function rich_test_body(): string {
+		$heading = __( 'Lean SMTP test email', 'lean-smtp' );
+		$intro   = __( 'If you can read this formatted message, see the coloured square below, and find the attached text file, your mail is delivering HTML, inline images and attachments correctly.', 'lean-smtp' );
+		$caption = __( 'The square above is a 1×1 inline image delivered with this message.', 'lean-smtp' );
+
+		return '<div style="font-family:sans-serif;font-size:15px;line-height:1.5;color:#1e1e1e">'
+			. '<h2 style="color:#3f32c4;margin:0 0 .5em">' . esc_html( $heading ) . '</h2>'
+			. '<p>' . esc_html( $intro ) . '</p>'
+			. '<p><img src="cid:lean-smtp-logo" width="24" height="24" alt="" style="background:#3f32c4;padding:10px;border-radius:6px"></p>'
+			. '<p style="color:#787c82;font-size:13px">' . esc_html( $caption ) . '</p>'
+			. '</div>';
 	}
 }

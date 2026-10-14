@@ -35,9 +35,14 @@ jobs:
           --health-interval=5s
           --health-timeout=5s
           --health-retries=10
+      mailpit:
+        image: axllent/mailpit
+        ports:
+          - 1025:1025
+          - 8025:8025
     strategy:
       matrix:
-        php-version: ["8.3", "8.4"]
+        php-version: ["8.1", "8.3", "8.4"]
     steps:
       - name: Check out code 🛒
         uses: actions/checkout@v7
@@ -62,10 +67,21 @@ jobs:
           DB_USER: root
           DB_PASS: root
           DB_NAME: wordpress_test
+          MAILPIT_SMTP_HOST: 127.0.0.1
+          MAILPIT_URL: http://127.0.0.1:8025
+
+  version:
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Check out code 🛒
+        uses: actions/checkout@v7
+
+      - name: Verify version consistency 🔖
+        run: ./.github/scripts/check-version.sh "${GITHUB_REF_NAME}"
 
   package:
     runs-on: ubuntu-26.04
-    needs: [lint, test]
+    needs: [lint, test, version]
     permissions:
       contents: write
     env:

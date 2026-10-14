@@ -12,6 +12,23 @@ class Test_Lean_SMTP_Mailgun extends WP_UnitTestCase {
 		parent::tear_down();
 	}
 
+	/**
+	 * Send through the real wp_mail() pipeline, so the pre_wp_mail hook wiring is
+	 * exercised and not just send_via_api() in isolation. init() is idempotent:
+	 * WordPress dedupes the identical static callbacks it adds.
+	 */
+	private function wp_mail_send( array $atts ) {
+		Lean_SMTP_Mailer::init();
+		return wp_mail(
+			$atts['to'] ?? '',
+			(string) ( $atts['subject'] ?? '' ),
+			$atts['message'] ?? '',
+			$atts['headers'] ?? '',
+			$atts['attachments'] ?? [],
+			$atts['embeds'] ?? []
+		);
+	}
+
 	private function configure_mailgun( $region = Lean_SMTP_Mailgun::REGION_US ) {
 		update_option( Lean_SMTP_Mailer::OPTION_MAILER, Lean_SMTP_Mailer::MAILER_MAILGUN );
 		update_option( Lean_SMTP_Mailgun::OPTION_DOMAIN, 'mg.example.com' );
@@ -69,8 +86,7 @@ class Test_Lean_SMTP_Mailgun extends WP_UnitTestCase {
 		$captured = [];
 		$this->capture_request( $captured );
 
-		$ok = Lean_SMTP_Mailer::send_via_api(
-			null,
+		$ok = $this->wp_mail_send(
 			[
 				'to'          => 'rcpt@example.com',
 				'subject'     => 'Hello',
@@ -101,8 +117,7 @@ class Test_Lean_SMTP_Mailgun extends WP_UnitTestCase {
 		$captured = [];
 		$this->capture_request( $captured );
 
-		Lean_SMTP_Mailer::send_via_api(
-			null,
+		$this->wp_mail_send(
 			[
 				'to'          => 'rcpt@example.com',
 				'subject'     => 'Hello',
@@ -128,8 +143,7 @@ class Test_Lean_SMTP_Mailgun extends WP_UnitTestCase {
 		$captured = [];
 		$this->capture_request( $captured );
 
-		Lean_SMTP_Mailer::send_via_api(
-			null,
+		$this->wp_mail_send(
 			[
 				'to'          => 'rcpt@example.com',
 				'subject'     => 'Hello',
@@ -156,8 +170,7 @@ class Test_Lean_SMTP_Mailgun extends WP_UnitTestCase {
 			}
 		);
 
-		$ok = Lean_SMTP_Mailer::send_via_api(
-			null,
+		$ok = $this->wp_mail_send(
 			[
 				'to'          => 'rcpt@example.com',
 				'subject'     => 'Hello',
@@ -183,8 +196,7 @@ class Test_Lean_SMTP_Mailgun extends WP_UnitTestCase {
 			}
 		);
 
-		$ok = Lean_SMTP_Mailer::send_via_api(
-			null,
+		$ok = $this->wp_mail_send(
 			[
 				'to'          => 'rcpt@example.com',
 				'subject'     => 'Hello',

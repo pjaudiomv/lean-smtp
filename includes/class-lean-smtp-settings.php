@@ -161,6 +161,7 @@ class Lean_SMTP_Settings {
 		register_setting( self::GROUP, Lean_SMTP_Logger::OPTION_LOG_HEADERS, [ 'sanitize_callback' => 'absint' ] );
 		register_setting( self::GROUP, Lean_SMTP_Logger::OPTION_LOG_BODY, [ 'sanitize_callback' => 'absint' ] );
 		register_setting( self::GROUP, Lean_SMTP_Logger::OPTION_RETENTION, [ 'sanitize_callback' => [ static::class, 'sanitize_retention' ] ] );
+		register_setting( self::GROUP, Lean_SMTP_Logger::OPTION_MAX_AGE, [ 'sanitize_callback' => [ static::class, 'sanitize_max_age' ] ] );
 
 		self::guard_constant_backed_settings();
 	}
@@ -219,6 +220,16 @@ class Lean_SMTP_Settings {
 		return (string) ( in_array( $rows, Lean_SMTP_Logger::RETENTION_CHOICES, true ) ? $rows : Lean_SMTP_Logger::MAX_ROWS );
 	}
 
+	/**
+	 * The age cap is a fixed set of day counts (0 = off) — see
+	 * Lean_SMTP_Logger::MAX_AGE_CHOICES.
+	 */
+	public static function sanitize_max_age( $value ): string {
+		$days = absint( $value );
+
+		return (string) ( in_array( $days, Lean_SMTP_Logger::MAX_AGE_CHOICES, true ) ? $days : 0 );
+	}
+
 	public static function sanitize_mailgun_region( $value ): string {
 		return Lean_SMTP_Mailgun::REGION_EU === $value ? Lean_SMTP_Mailgun::REGION_EU : Lean_SMTP_Mailgun::REGION_US;
 	}
@@ -254,12 +265,16 @@ class Lean_SMTP_Settings {
 	 * what could break out of the SMTP dialogue or an HTTP header downstream.
 	 *
 	 * A blank submission keeps the stored value, so re-saving the form doesn't wipe
-	 * a secret the field never echoes back.
+	 * a secret the field never echoes back. To actually remove a stored secret
+	 * there is an explicit "clear" checkbox beside the field — see clear_checkbox()
+	 * — whose companion field is read here.
 	 */
 	private static function sanitize_secret( $value, string $option ): string {
 		$value = is_string( $value ) ? trim( $value ) : '';
 		if ( '' === $value ) {
-			return (string) get_option( $option, '' );
+			// An empty field with its "clear" box ticked removes the stored secret;
+			// an empty field on its own keeps whatever is saved.
+			return self::secret_cleared( $option ) ? '' : (string) get_option( $option, '' );
 		}
 		// WordPress runs the sanitize callback twice on the first save of a new
 		// option (update_option, then add_option). The second pass receives our
@@ -274,6 +289,21 @@ class Lean_SMTP_Settings {
 		return Lean_SMTP_Crypto::encrypt( trim( is_string( $stripped ) ? $stripped : $value ) );
 	}
 
+	/**
+	 * Whether the "clear" checkbox beside a secret field was ticked on this save.
+	 *
+	 * The checkbox posts a companion field named "{option}__clear"; it is not a
+	 * registered setting, so it never reaches the options table — it is only a
+	 * one-shot instruction read while sanitizing. options.php has already verified
+	 * this option group's nonce before any sanitize callback runs.
+	 */
+	private static function secret_cleared( string $option ): bool {
+		$field = $option . '__clear';
+		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- options.php verified the settings-group nonce before this sanitize callback ran.
+		$value = isset( $_POST[ $field ] ) ? sanitize_text_field( wp_unslash( $_POST[ $field ] ) ) : '';
+		return '1' === $value;
+	}
+
 	// -------------------------------------------------------------------------
 	// Test email
 	// -------------------------------------------------------------------------
@@ -285,7 +315,8 @@ class Lean_SMTP_Settings {
 		check_admin_referer( 'lean_smtp_test' );
 
 		$to     = isset( $_POST['lean_smtp_test_to'] ) ? sanitize_email( wp_unslash( (string) $_POST['lean_smtp_test_to'] ) ) : '';
-		$result = Lean_SMTP_Mailer::send_test( $to );
+		$rich   = isset( $_POST['lean_smtp_test_rich'] ) && '1' === sanitize_text_field( wp_unslash( $_POST['lean_smtp_test_rich'] ) );
+		$result = Lean_SMTP_Mailer::send_test( $to, $rich );
 
 		$args = is_wp_error( $result )
 			? [
@@ -362,11 +393,32 @@ class Lean_SMTP_Settings {
 			value="" class="regular-text" autocomplete="new-password"
 			placeholder="<?php echo esc_attr( $placeholder ); ?>"
 			<?php disabled( Lean_SMTP_Config::is_constant( $option ) ); ?> />
-		<?php if ( '' !== $description ) : ?>
-			<p class="description"><?php echo esc_html( $description ); ?></p>
-		<?php endif; ?>
 		<?php
+		self::clear_checkbox( $option );
+		if ( '' !== $description ) :
+			?>
+			<p class="description"><?php echo esc_html( $description ); ?></p>
+			<?php
+		endif;
 		self::lock_note( $option );
+	}
+
+	/**
+	 * An explicit "clear" control for a stored secret. Because a blank field is
+	 * taken as "keep the saved value", removing a secret needs a deliberate
+	 * action — ticking this and saving empties it. Shown only when there is a
+	 * value to clear and the setting is not pinned by a constant.
+	 */
+	private static function clear_checkbox( string $option ): void {
+		if ( Lean_SMTP_Config::is_constant( $option ) || ! Lean_SMTP_Config::has_secret( $option ) ) {
+			return;
+		}
+		?>
+		<label class="lsmtp-clear-secret">
+			<input type="checkbox" name="<?php echo esc_attr( $option ); ?>__clear" value="1" />
+			<?php esc_html_e( 'Clear the saved value on save', 'lean-smtp' ); ?>
+		</label>
+		<?php
 	}
 
 	/**
@@ -383,10 +435,13 @@ class Lean_SMTP_Settings {
 			class="large-text code" rows="6" autocomplete="off" spellcheck="false"
 			placeholder="<?php echo esc_attr( $placeholder ); ?>"
 			<?php disabled( Lean_SMTP_Config::is_constant( $option ) ); ?>></textarea>
-		<?php if ( '' !== $description ) : ?>
-			<p class="description"><?php echo esc_html( $description ); ?></p>
-		<?php endif; ?>
 		<?php
+		self::clear_checkbox( $option );
+		if ( '' !== $description ) :
+			?>
+			<p class="description"><?php echo esc_html( $description ); ?></p>
+			<?php
+		endif;
 		self::lock_note( $option );
 	}
 
@@ -836,6 +891,19 @@ class Lean_SMTP_Settings {
 							</td>
 						</tr>
 						<tr>
+							<th scope="row"><label for="<?php echo esc_attr( Lean_SMTP_Logger::OPTION_MAX_AGE ); ?>"><?php esc_html_e( 'Delete After', 'lean-smtp' ); ?></label></th>
+							<td>
+								<?php
+								self::select_field(
+									Lean_SMTP_Logger::OPTION_MAX_AGE,
+									self::max_age_choices(),
+									'0',
+									__( 'Also remove entries older than this, whatever the count — so old message content cannot linger. Applied as mail is logged and when this log is viewed.', 'lean-smtp' )
+								);
+								?>
+							</td>
+						</tr>
+						<tr>
 							<th scope="row"><?php esc_html_e( 'Message Content', 'lean-smtp' ); ?></th>
 							<td>
 								<?php
@@ -885,6 +953,29 @@ class Lean_SMTP_Settings {
 		return $choices;
 	}
 
+	/**
+	 * Age-cap sizes as select choices, 0 => "Off". The option set is driven by
+	 * the logger constant; only the labels live here.
+	 *
+	 * @return array<string, string>
+	 */
+	private static function max_age_choices(): array {
+		$labels = [
+			0   => __( 'Off', 'lean-smtp' ),
+			7   => __( '7 days', 'lean-smtp' ),
+			30  => __( '30 days', 'lean-smtp' ),
+			90  => __( '90 days', 'lean-smtp' ),
+			365 => __( '1 year', 'lean-smtp' ),
+		];
+
+		$choices = [];
+		foreach ( Lean_SMTP_Logger::MAX_AGE_CHOICES as $days ) {
+			$choices[ (string) $days ] = $labels[ $days ] ?? (string) $days;
+		}
+
+		return $choices;
+	}
+
 	private static function test_notice(): void {
 		// phpcs:disable WordPress.Security.NonceVerification.Recommended
 		if ( ! isset( $_GET['lsmtp_test'] ) ) {
@@ -920,6 +1011,12 @@ class Lean_SMTP_Settings {
 				<input type="email" name="lean_smtp_test_to" class="regular-text" required
 					value="<?php echo esc_attr( (string) get_option( 'admin_email' ) ); ?>" />
 				<?php submit_button( __( 'Send Test Email', 'lean-smtp' ), 'secondary', 'submit', false ); ?>
+				<p>
+					<label class="lsmtp-test-rich">
+						<input type="checkbox" name="lean_smtp_test_rich" value="1" />
+						<?php esc_html_e( 'Rich test — HTML, an inline image and an attachment (surfaces format problems a plain-text test misses)', 'lean-smtp' ); ?>
+					</label>
+				</p>
 			</form>
 			<p class="description lsmtp-test-note"><?php esc_html_e( 'On the command line: wp lean-smtp test, or wp lean-smtp status to see the configuration in force.', 'lean-smtp' ); ?></p>
 		</div>

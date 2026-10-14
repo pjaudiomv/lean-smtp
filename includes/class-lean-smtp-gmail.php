@@ -149,7 +149,7 @@ class Lean_SMTP_Gmail implements Lean_SMTP_Api_Transport {
 	 * stripping the header would simply lose those recipients.
 	 *
 	 * @param PHPMailer\PHPMailer\PHPMailer $phpmailer Assembled, `preSend()` already called.
-	 * @return true|WP_Error
+	 * @return string|WP_Error The Gmail message id (may be '') on success, or a WP_Error.
 	 */
 	public static function send( PHPMailer\PHPMailer\PHPMailer $phpmailer ) {
 		$token = self::access_token();
@@ -163,8 +163,9 @@ class Lean_SMTP_Gmail implements Lean_SMTP_Api_Transport {
 	/**
 	 * A valid access token for the impersonated sender, from the short-lived
 	 * cache or freshly minted. Tokens are specific to the credentials + sender,
-	 * so the cache is keyed to both — change either and a stale token is never
-	 * reused.
+	 * so the cache is keyed to the service-account email, the sender *and* a
+	 * fingerprint of the private key — rotate the key and the old token is never
+	 * reused, so a fresh exchange proves the replacement actually authenticates.
 	 *
 	 * @return string|WP_Error
 	 */
@@ -176,7 +177,7 @@ class Lean_SMTP_Gmail implements Lean_SMTP_Api_Transport {
 			return new WP_Error( 'lean_smtp_gmail_unconfigured', __( 'Gmail is not configured (a service-account key and a sender address are required).', 'lean-smtp' ) );
 		}
 
-		$cache_key = self::TOKEN_TRANSIENT . '_' . md5( $credentials['client_email'] . '|' . $sender );
+		$cache_key = self::TOKEN_TRANSIENT . '_' . md5( $credentials['client_email'] . '|' . $sender . '|' . (string) $credentials['private_key'] );
 		$cached    = get_transient( $cache_key );
 		if ( is_string( $cached ) && '' !== $cached ) {
 			return $cached;
@@ -224,7 +225,7 @@ class Lean_SMTP_Gmail implements Lean_SMTP_Api_Transport {
 	/**
 	 * POST the raw MIME to the Gmail send endpoint for the impersonated user.
 	 *
-	 * @return true|WP_Error
+	 * @return string|WP_Error The Gmail message id (may be '') on success, or a WP_Error.
 	 */
 	private static function send_message( string $token, string $raw_mime ) {
 		$endpoint = sprintf( self::SEND_ENDPOINT, rawurlencode( self::sender() ) );
@@ -246,11 +247,11 @@ class Lean_SMTP_Gmail implements Lean_SMTP_Api_Transport {
 		}
 
 		$code = (int) wp_remote_retrieve_response_code( $response );
+		$body = json_decode( (string) wp_remote_retrieve_body( $response ), true );
 		if ( $code >= 200 && $code < 300 ) {
-			return true;
+			return is_array( $body ) && ! empty( $body['id'] ) ? (string) $body['id'] : '';
 		}
 
-		$body    = json_decode( (string) wp_remote_retrieve_body( $response ), true );
 		$message = is_array( $body ) && isset( $body['error']['message'] ) && '' !== $body['error']['message']
 			? (string) $body['error']['message']
 			: wp_remote_retrieve_response_message( $response );

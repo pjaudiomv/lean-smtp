@@ -37,6 +37,7 @@ $lean_smtp_options = [
 	'lean_smtp_log_headers',
 	'lean_smtp_log_body',
 	'lean_smtp_log_retention',
+	'lean_smtp_log_max_age',
 	'lean_smtp_db_version',
 	'lean_smtp_last_failure',
 ];

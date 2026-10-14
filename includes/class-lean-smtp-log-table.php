@@ -277,6 +277,7 @@ class Lean_SMTP_Log_Table extends WP_List_Table {
 	 */
 	private function render_detail( $item ): void {
 		$parts = [
+			__( 'Message ID', 'lean-smtp' )  => (string) ( $item->message_id ?? '' ),
 			__( 'Error', 'lean-smtp' )       => (string) ( $item->error ?? '' ),
 			__( 'Headers', 'lean-smtp' )     => (string) ( $item->headers ?? '' ),
 			__( 'Attachments', 'lean-smtp' ) => (string) ( $item->attachments ?? '' ),

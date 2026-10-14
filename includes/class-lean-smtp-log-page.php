@@ -106,6 +106,10 @@ class Lean_SMTP_Log_Page {
 
 		self::handle_actions();
 
+		// Apply the age cap on view too, so old entries expire even on a site that
+		// has stopped sending (there is no background job to lean on).
+		Lean_SMTP_Logger::purge_expired();
+
 		self::$table = new Lean_SMTP_Log_Table();
 		self::$table->prepare_items();
 	}

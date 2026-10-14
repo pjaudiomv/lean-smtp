@@ -28,19 +28,26 @@ class Lean_SMTP_CLI {
 	 * [<recipient>]
 	 * : Address to send to. Defaults to the site's admin email.
 	 *
+	 * [--rich]
+	 * : Send an HTML message with an attachment and an inline image instead of a
+	 * plain-text one, to surface message-format problems.
+	 *
 	 * ## EXAMPLES
 	 *
 	 *     wp lean-smtp test
 	 *     wp lean-smtp test someone@example.com
+	 *     wp lean-smtp test someone@example.com --rich
 	 *
-	 * @param array $args Positional arguments.
+	 * @param array $args       Positional arguments.
+	 * @param array $assoc_args Associative arguments.
 	 */
-	public function test( array $args ): void {
-		$to = $args[0] ?? (string) get_option( 'admin_email' );
+	public function test( array $args, array $assoc_args = [] ): void {
+		$to   = $args[0] ?? (string) get_option( 'admin_email' );
+		$rich = isset( $assoc_args['rich'] );
 
 		WP_CLI::log( sprintf( 'Sending via %s to %s…', strtoupper( Lean_SMTP_Mailer::mailer() ), $to ) );
 
-		$result = Lean_SMTP_Mailer::send_test( $to );
+		$result = Lean_SMTP_Mailer::send_test( $to, $rich );
 
 		if ( is_wp_error( $result ) ) {
 			WP_CLI::error( $result->get_error_message() );
@@ -96,6 +103,7 @@ class Lean_SMTP_CLI {
 		$rows[] = self::row( __( 'Log Headers', 'lean-smtp' ), Lean_SMTP_Logger::log_headers() ? 'yes' : 'no', Lean_SMTP_Logger::OPTION_LOG_HEADERS );
 		$rows[] = self::row( __( 'Log Body', 'lean-smtp' ), Lean_SMTP_Logger::log_body() ? 'yes' : 'no', Lean_SMTP_Logger::OPTION_LOG_BODY );
 		$rows[] = self::row( __( 'Log Retention', 'lean-smtp' ), (string) Lean_SMTP_Logger::retention() . ' rows', Lean_SMTP_Logger::OPTION_RETENTION );
+		$rows[] = self::row( __( 'Log Max Age', 'lean-smtp' ), Lean_SMTP_Logger::max_age() > 0 ? Lean_SMTP_Logger::max_age() . ' days' : 'off', Lean_SMTP_Logger::OPTION_MAX_AGE );
 		$rows[] = [
 			'setting' => __( 'Configured', 'lean-smtp' ),
 			'value'   => Lean_SMTP_Mailer::is_configured() ? 'yes' : 'no',

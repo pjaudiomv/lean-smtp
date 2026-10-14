@@ -10,10 +10,11 @@ COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
 WORKDIR /app
 
-# Install dependencies first (layer cache).
-COPY composer.json composer.lock* ./
-RUN composer install --prefer-dist --no-progress --no-interaction || \
-    composer update --prefer-dist --no-progress --no-interaction
+# Install dependencies first (layer cache). Install strictly from the lockfile:
+# no `composer update` fallback, so the image can never silently test a
+# different dependency set than the one that is committed.
+COPY composer.json composer.lock ./
+RUN composer install --prefer-dist --no-progress --no-interaction
 
 # Copy the rest of the plugin.
 COPY . .

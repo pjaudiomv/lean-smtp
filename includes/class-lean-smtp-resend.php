@@ -40,7 +40,7 @@ class Lean_SMTP_Resend implements Lean_SMTP_Api_Transport {
 
 	/**
 	 * @param PHPMailer\PHPMailer\PHPMailer $phpmailer Assembled, `preSend()` already called.
-	 * @return true|WP_Error
+	 * @return string|WP_Error The provider message id (may be '') on success, or a WP_Error.
 	 */
 	public static function send( PHPMailer\PHPMailer\PHPMailer $phpmailer ) {
 		if ( ! self::is_configured() ) {
@@ -68,12 +68,12 @@ class Lean_SMTP_Resend implements Lean_SMTP_Api_Transport {
 			return $response;
 		}
 
-		$code = (int) wp_remote_retrieve_response_code( $response );
+		$code    = (int) wp_remote_retrieve_response_code( $response );
+		$decoded = json_decode( (string) wp_remote_retrieve_body( $response ), true );
 		if ( $code >= 200 && $code < 300 ) {
-			return true;
+			return is_array( $decoded ) && ! empty( $decoded['id'] ) ? (string) $decoded['id'] : '';
 		}
 
-		$decoded = json_decode( (string) wp_remote_retrieve_body( $response ), true );
 		$message = is_array( $decoded ) && ! empty( $decoded['message'] )
 			? (string) $decoded['message']
 			: wp_remote_retrieve_response_message( $response );
@@ -100,8 +100,16 @@ class Lean_SMTP_Resend implements Lean_SMTP_Api_Transport {
 		];
 
 		// PHPMailer keeps the HTML in Body and the plain-text alternative in
-		// AltBody; for a text/plain message Body *is* the text.
-		if ( 'text/html' === $phpmailer->ContentType ) {
+		// AltBody; for a text/plain message Body *is* the text. preSend() rewrites
+		// ContentType to multipart/alternative once an AltBody exists, so an HTML
+		// message with a plain-text part no longer reads as text/html — treat both
+		// as HTML, or the markup would be shipped as the plain-text body.
+		$is_html = in_array(
+			(string) $phpmailer->ContentType,
+			[ 'text/html', PHPMailer\PHPMailer\PHPMailer::CONTENT_TYPE_MULTIPART_ALTERNATIVE ],
+			true
+		);
+		if ( $is_html ) {
 			$payload['html'] = (string) $phpmailer->Body;
 			if ( '' !== trim( (string) $phpmailer->AltBody ) ) {
 				$payload['text'] = (string) $phpmailer->AltBody;

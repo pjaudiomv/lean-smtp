@@ -12,6 +12,25 @@ class Test_Lean_SMTP_Mailer extends WP_UnitTestCase {
 		parent::tear_down();
 	}
 
+	/**
+	 * Send through the real wp_mail() pipeline. init() wires pre_wp_mail to the
+	 * API handler for the configured mailer, exactly as a live request does, so
+	 * these tests exercise the hook integration and not just send_via_api()
+	 * in isolation. (init() is idempotent — WordPress dedupes the identical
+	 * static callbacks, so calling it per send adds no duplicate hooks.)
+	 */
+	private function wp_mail_send( array $atts ) {
+		Lean_SMTP_Mailer::init();
+		return wp_mail(
+			$atts['to'] ?? '',
+			(string) ( $atts['subject'] ?? '' ),
+			$atts['message'] ?? '',
+			$atts['headers'] ?? '',
+			$atts['attachments'] ?? [],
+			$atts['embeds'] ?? []
+		);
+	}
+
 	// -------------------------------------------------------------------------
 	// From identity
 	// -------------------------------------------------------------------------
@@ -129,8 +148,7 @@ class Test_Lean_SMTP_Mailer extends WP_UnitTestCase {
 			3
 		);
 
-		Lean_SMTP_Mailer::send_via_api(
-			null,
+		$this->wp_mail_send(
 			[
 				'to'          => 'rcpt@example.com',
 				'subject'     => 'Hello',
@@ -229,8 +247,7 @@ class Test_Lean_SMTP_Mailer extends WP_UnitTestCase {
 			3
 		);
 
-		$ok = Lean_SMTP_Mailer::send_via_api(
-			null,
+		$ok = $this->wp_mail_send(
 			[
 				'to'          => 'rcpt@example.com',
 				'subject'     => 'Hello',
@@ -273,8 +290,7 @@ class Test_Lean_SMTP_Mailer extends WP_UnitTestCase {
 			3
 		);
 
-		Lean_SMTP_Mailer::send_via_api(
-			null,
+		$this->wp_mail_send(
 			[
 				'to'          => 'rcpt@example.com',
 				'subject'     => 'Hello',
@@ -311,8 +327,7 @@ class Test_Lean_SMTP_Mailer extends WP_UnitTestCase {
 			3
 		);
 
-		Lean_SMTP_Mailer::send_via_api(
-			null,
+		$this->wp_mail_send(
 			[
 				'to'          => 'rcpt@example.com',
 				'subject'     => 'Hello',
@@ -352,8 +367,7 @@ class Test_Lean_SMTP_Mailer extends WP_UnitTestCase {
 			}
 		);
 
-		$ok = Lean_SMTP_Mailer::send_via_api(
-			null,
+		$ok = $this->wp_mail_send(
 			[
 				'to'          => 'rcpt@example.com',
 				'subject'     => 'Hello',
@@ -425,8 +439,7 @@ class Test_Lean_SMTP_Mailer extends WP_UnitTestCase {
 			}
 		);
 
-		Lean_SMTP_Mailer::send_via_api(
-			null,
+		$this->wp_mail_send(
 			[
 				'to'          => 'rcpt@example.com',
 				'subject'     => 'Hello',
@@ -462,8 +475,7 @@ class Test_Lean_SMTP_Mailer extends WP_UnitTestCase {
 			}
 		);
 
-		Lean_SMTP_Mailer::send_via_api(
-			null,
+		$this->wp_mail_send(
 			[
 				'to'          => 'rcpt@example.com',
 				'subject'     => 'Hello',
@@ -474,5 +486,234 @@ class Test_Lean_SMTP_Mailer extends WP_UnitTestCase {
 		);
 
 		$this->assertSame( 1, $calls, 'A failed SES send must fire wp_mail_failed once, so it logs once.' );
+	}
+
+	public function test_api_send_honours_an_earlier_pre_wp_mail_short_circuit() {
+		// An earlier pre_wp_mail filter returning non-null means the message was
+		// already handled (cancelled, or sent by that filter). Our handler must
+		// hand that decision back untouched, never contacting the provider.
+		$this->configure_ses();
+		add_filter(
+			'pre_http_request',
+			function () {
+				$this->fail( 'A short-circuited send must never reach the provider.' );
+			}
+		);
+
+		$atts = [
+			'to'          => 'rcpt@example.com',
+			'subject'     => 'Hello',
+			'message'     => 'Body',
+			'headers'     => '',
+			'attachments' => [],
+		];
+
+		$this->assertFalse( Lean_SMTP_Mailer::send_via_api( false, $atts ) );
+		$this->assertTrue( Lean_SMTP_Mailer::send_via_api( true, $atts ) );
+	}
+
+	public function test_offline_honours_an_earlier_pre_wp_mail_short_circuit() {
+		update_option( Lean_SMTP_Mailer::OPTION_MAILER, Lean_SMTP_Mailer::MAILER_OFFLINE );
+		update_option( Lean_SMTP_Logger::OPTION_ENABLED, '1' );
+		Lean_SMTP_Logger::clear();
+
+		$result = Lean_SMTP_Mailer::send_offline(
+			false,
+			[
+				'to'      => 'rcpt@example.com',
+				'subject' => 'Cancelled',
+				'message' => 'Body',
+			]
+		);
+
+		$this->assertFalse( $result );
+		$this->assertCount( 0, Lean_SMTP_Logger::recent( 5 ), 'A cancelled send must not be recorded as offline.' );
+
+		Lean_SMTP_Logger::clear();
+		delete_option( Lean_SMTP_Logger::OPTION_ENABLED );
+	}
+
+	public function test_wp_mail_filter_is_applied_exactly_once_on_the_api_path() {
+		// Core applies the `wp_mail` filter before pre_wp_mail and hands the
+		// result to our handler, which must not apply it a second time — otherwise
+		// a non-idempotent filter (here, appending to the subject) runs twice.
+		$this->configure_ses();
+
+		$calls = 0;
+		add_filter(
+			'wp_mail',
+			function ( $atts ) use ( &$calls ) {
+				++$calls;
+				$atts['subject'] .= ' [filtered]';
+				return $atts;
+			}
+		);
+
+		$captured = [];
+		add_filter(
+			'pre_http_request',
+			function ( $preempt, $args ) use ( &$captured ) {
+				$captured['args'] = $args;
+				return [
+					'response' => [
+						'code'    => 200,
+						'message' => 'OK',
+					],
+					'body'     => '{"MessageId":"x"}',
+				];
+			},
+			10,
+			3
+		);
+
+		// init() wires pre_wp_mail => send_via_api, so a real wp_mail() call goes
+		// through the same path production does.
+		Lean_SMTP_Mailer::init();
+		wp_mail( 'rcpt@example.com', 'Hello', 'Body' );
+
+		$this->assertSame( 1, $calls, 'The wp_mail filter must run once, not again inside the handler.' );
+
+		$raw = base64_decode( json_decode( $captured['args']['body'], true )['Content']['Raw']['Data'] );
+		$this->assertStringContainsString( 'Subject: Hello [filtered]', $raw );
+		$this->assertStringNotContainsString( '[filtered] [filtered]', $raw );
+	}
+
+	public function test_inline_embeds_reach_an_api_send_with_their_content_id() {
+		// The sixth wp_mail() argument (embeds, WordPress 6.9+): a cid: image must
+		// survive the API assembly rather than being silently dropped.
+		$this->configure_ses();
+
+		$image = wp_tempnam( 'lean-smtp-embed' );
+		file_put_contents( $image, 'PNGDATA' );
+
+		$captured = [];
+		add_filter(
+			'pre_http_request',
+			function ( $preempt, $args ) use ( &$captured ) {
+				$captured['args'] = $args;
+				return [
+					'response' => [
+						'code'    => 200,
+						'message' => 'OK',
+					],
+					'body'     => '{"MessageId":"x"}',
+				];
+			},
+			10,
+			3
+		);
+
+		$ok = $this->wp_mail_send(
+			[
+				'to'          => 'rcpt@example.com',
+				'subject'     => 'Hello',
+				'message'     => '<p>See <img src="cid:logo"></p>',
+				'headers'     => 'Content-Type: text/html',
+				'attachments' => [],
+				'embeds'      => [ 'logo' => $image ],
+			]
+		);
+
+		unlink( $image );
+
+		$this->assertTrue( $ok );
+		$raw = base64_decode( json_decode( $captured['args']['body'], true )['Content']['Raw']['Data'] );
+		$this->assertStringContainsString( 'Content-ID: <logo>', $raw );
+		$this->assertStringContainsString( base64_encode( 'PNGDATA' ), $raw );
+	}
+
+	// -------------------------------------------------------------------------
+	// Feature additions
+	// -------------------------------------------------------------------------
+
+	public function test_provider_message_id_is_recorded_in_the_log() {
+		$this->configure_ses();
+		update_option( Lean_SMTP_Logger::OPTION_ENABLED, '1' );
+		Lean_SMTP_Logger::clear();
+
+		add_filter(
+			'pre_http_request',
+			function () {
+				return [
+					'response' => [
+						'code'    => 200,
+						'message' => 'OK',
+					],
+					'body'     => '{"MessageId":"0100-msgid-xyz"}',
+				];
+			}
+		);
+
+		// init() registers the wp_mail_succeeded logging hook (logging is already
+		// on), so the send records a row carrying the provider's id.
+		Lean_SMTP_Mailer::init();
+		$this->wp_mail_send(
+			[
+				'to'          => 'rcpt@example.com',
+				'subject'     => 'Hello',
+				'message'     => 'Body',
+				'headers'     => '',
+				'attachments' => [],
+			]
+		);
+
+		$rows = Lean_SMTP_Logger::recent( 5 );
+		$this->assertCount( 1, $rows );
+		$this->assertSame( '0100-msgid-xyz', $rows[0]->message_id );
+
+		Lean_SMTP_Logger::clear();
+		delete_option( Lean_SMTP_Logger::OPTION_ENABLED );
+	}
+
+	public function test_clear_checkbox_empties_a_stored_secret_on_save() {
+		update_option( Lean_SMTP_Resend::OPTION_API_KEY, Lean_SMTP_Crypto::encrypt( 're_existing' ) );
+
+		$_POST[ Lean_SMTP_Resend::OPTION_API_KEY . '__clear' ] = '1';
+		try {
+			// A blank field with the clear box ticked removes the secret...
+			$this->assertSame( '', Lean_SMTP_Settings::sanitize_resend_key( '' ) );
+		} finally {
+			unset( $_POST[ Lean_SMTP_Resend::OPTION_API_KEY . '__clear' ] );
+		}
+	}
+
+	public function test_blank_secret_without_clear_keeps_the_stored_value() {
+		// ...whereas a blank field on its own keeps whatever is stored.
+		$stored = Lean_SMTP_Crypto::encrypt( 're_existing' );
+		update_option( Lean_SMTP_Resend::OPTION_API_KEY, $stored );
+
+		$this->assertSame( $stored, Lean_SMTP_Settings::sanitize_resend_key( '' ) );
+	}
+
+	public function test_rich_test_email_sends_html_with_an_attachment_and_inline_image() {
+		$this->configure_ses();
+
+		$captured = [];
+		add_filter(
+			'pre_http_request',
+			function ( $preempt, $args ) use ( &$captured ) {
+				$captured['args'] = $args;
+				return [
+					'response' => [
+						'code'    => 200,
+						'message' => 'OK',
+					],
+					'body'     => '{"MessageId":"x"}',
+				];
+			},
+			10,
+			3
+		);
+
+		// send_test() goes through wp_mail(), so pre_wp_mail must be wired up.
+		Lean_SMTP_Mailer::init();
+		$result = Lean_SMTP_Mailer::send_test( 'rcpt@example.com', true );
+
+		$this->assertTrue( $result );
+		$raw = base64_decode( json_decode( $captured['args']['body'], true )['Content']['Raw']['Data'] );
+		$this->assertStringContainsString( 'text/html', $raw );
+		$this->assertStringContainsString( 'Content-ID: <lean-smtp-logo>', $raw );
+		$this->assertStringContainsString( 'Content-Disposition: attachment', $raw );
+		$this->assertStringContainsString( 'lean-smtp-test-', $raw );
 	}
 }

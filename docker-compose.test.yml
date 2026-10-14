@@ -6,11 +6,22 @@ services:
     depends_on:
       db-test:
         condition: service_healthy
+      mailpit:
+        condition: service_started
     environment:
       DB_HOST: db-test
       DB_PASS: root
+      # Lets the SMTP integration test deliver to Mailpit and read it back; when
+      # unset (e.g. a plain local phpunit run) that test skips itself.
+      MAILPIT_SMTP_HOST: mailpit
+      MAILPIT_URL: http://mailpit:8025
     volumes:
       - ./tests:/app/tests
+
+  # SMTP sink the SMTP delivery test sends to (1025) and reads back over its
+  # HTTP API (8025).
+  mailpit:
+    image: axllent/mailpit
 
   db-test:
     image: mariadb:10.11
