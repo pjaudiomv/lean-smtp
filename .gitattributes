@@ -18,6 +18,7 @@
 /composer.lock      export-ignore
 /docker-compose.test.yml export-ignore
 /docker-compose.yml export-ignore
+/docs               export-ignore
 /logs               export-ignore
 /phpunit.xml        export-ignore
 /tests              export-ignore

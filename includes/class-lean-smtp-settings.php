@@ -33,6 +33,9 @@ class Lean_SMTP_Settings {
 		add_action( 'admin_init', [ static::class, 'redirect_legacy_url' ] );
 		add_action( 'admin_enqueue_scripts', [ static::class, 'enqueue_assets' ] );
 		add_action( 'admin_post_lean_smtp_test', [ static::class, 'handle_test' ] );
+		add_action( 'admin_post_lean_smtp_gmail_oauth_connect', [ static::class, 'handle_gmail_oauth_connect' ] );
+		add_action( 'admin_post_' . Lean_SMTP_Gmail_OAuth::CALLBACK_ACTION, [ static::class, 'handle_gmail_oauth_callback' ] );
+		add_action( 'admin_post_lean_smtp_gmail_oauth_disconnect', [ static::class, 'handle_gmail_oauth_disconnect' ] );
 		add_filter( 'plugin_action_links_' . plugin_basename( LEAN_SMTP_FILE ), [ static::class, 'settings_link' ] );
 	}
 
@@ -157,6 +160,13 @@ class Lean_SMTP_Settings {
 		register_setting( self::GROUP, Lean_SMTP_Gmail::OPTION_SERVICE_ACCOUNT, [ 'sanitize_callback' => [ static::class, 'sanitize_gmail_key' ] ] );
 		register_setting( self::GROUP, Lean_SMTP_Gmail::OPTION_SENDER, [ 'sanitize_callback' => 'sanitize_email' ] );
 
+		// The OAuth client id/secret are entered on the form; the refresh token and
+		// connected sender are written by the consent callback, never posted here,
+		// so they are deliberately not registered settings (and so never wiped by a
+		// form save).
+		register_setting( self::GROUP, Lean_SMTP_Gmail_OAuth::OPTION_CLIENT_ID, [ 'sanitize_callback' => 'sanitize_text_field' ] );
+		register_setting( self::GROUP, Lean_SMTP_Gmail_OAuth::OPTION_CLIENT_SECRET, [ 'sanitize_callback' => [ static::class, 'sanitize_gmail_oauth_secret' ] ] );
+
 		register_setting( self::GROUP, Lean_SMTP_Logger::OPTION_ENABLED, [ 'sanitize_callback' => 'absint' ] );
 		register_setting( self::GROUP, Lean_SMTP_Logger::OPTION_LOG_HEADERS, [ 'sanitize_callback' => 'absint' ] );
 		register_setting( self::GROUP, Lean_SMTP_Logger::OPTION_LOG_BODY, [ 'sanitize_callback' => 'absint' ] );
@@ -254,6 +264,10 @@ class Lean_SMTP_Settings {
 		return self::sanitize_secret( $value, Lean_SMTP_Gmail::OPTION_SERVICE_ACCOUNT );
 	}
 
+	public static function sanitize_gmail_oauth_secret( $value ): string {
+		return self::sanitize_secret( $value, Lean_SMTP_Gmail_OAuth::OPTION_CLIENT_SECRET );
+	}
+
 	/**
 	 * Sanitize and encrypt a submitted credential.
 	 *
@@ -325,6 +339,101 @@ class Lean_SMTP_Settings {
 			]
 			: [ 'lsmtp_test' => 'ok' ];
 
+		wp_safe_redirect( self::url( self::PAGE, $args ) );
+		exit;
+	}
+
+	// -------------------------------------------------------------------------
+	// Gmail OAuth consent round-trip
+	// -------------------------------------------------------------------------
+
+	/**
+	 * Kick off the OAuth consent: build Google's authorization URL and send the
+	 * admin's browser to it. The client id/secret must already be saved, since
+	 * the URL is signed with the client id server-side.
+	 */
+	public static function handle_gmail_oauth_connect(): void {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'You do not have permission to do that.', 'lean-smtp' ) );
+		}
+		check_admin_referer( 'lean_smtp_gmail_oauth_connect' );
+
+		if ( '' === Lean_SMTP_Gmail_OAuth::client_id() || '' === Lean_SMTP_Gmail_OAuth::client_secret() ) {
+			wp_safe_redirect(
+				self::url(
+					self::PAGE,
+					[
+						'lsmtp_oauth' => 'fail',
+						'lsmtp_msg'   => rawurlencode( __( 'Enter and save the OAuth client ID and secret first.', 'lean-smtp' ) ),
+					]
+				)
+			);
+			exit;
+		}
+
+		$state = wp_create_nonce( 'lean_smtp_gmail_oauth_state' );
+		// Deliberately wp_redirect, not wp_safe_redirect: the target is Google's
+		// consent screen, an external host wp_safe_redirect would reject.
+		wp_redirect( Lean_SMTP_Gmail_OAuth::authorize_url( Lean_SMTP_Gmail_OAuth::redirect_uri(), $state ) ); // phpcs:ignore WordPress.Security.SafeRedirect.wp_redirect_wp_redirect -- External OAuth consent URL; wp_safe_redirect would block it.
+		exit;
+	}
+
+	/**
+	 * Google's redirect target: verify the state nonce, exchange the returned
+	 * code for a refresh token, and store the connection. Then bounce back to the
+	 * settings page with an ok/fail flag.
+	 */
+	public static function handle_gmail_oauth_callback(): void {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'You do not have permission to do that.', 'lean-smtp' ) );
+		}
+
+		$state = isset( $_GET['state'] ) ? sanitize_text_field( wp_unslash( (string) $_GET['state'] ) ) : '';
+		if ( ! wp_verify_nonce( $state, 'lean_smtp_gmail_oauth_state' ) ) {
+			wp_die( esc_html__( 'The authorization request could not be verified. Please try connecting again.', 'lean-smtp' ) );
+		}
+
+		// Google reports a declined or failed consent as ?error=…
+		if ( isset( $_GET['error'] ) ) {
+			$error = sanitize_text_field( wp_unslash( (string) $_GET['error'] ) );
+			self::redirect_oauth_result( 'fail', $error );
+		}
+
+		$code = isset( $_GET['code'] ) ? sanitize_text_field( wp_unslash( (string) $_GET['code'] ) ) : '';
+		if ( '' === $code ) {
+			self::redirect_oauth_result( 'fail', __( 'No authorization code was returned by Google.', 'lean-smtp' ) );
+		}
+
+		$result = Lean_SMTP_Gmail_OAuth::complete_authorization( $code, Lean_SMTP_Gmail_OAuth::redirect_uri() );
+
+		if ( is_wp_error( $result ) ) {
+			self::redirect_oauth_result( 'fail', $result->get_error_message() );
+		}
+
+		self::redirect_oauth_result( 'ok', '' );
+	}
+
+	/**
+	 * Revoke and forget the stored Google authorization.
+	 */
+	public static function handle_gmail_oauth_disconnect(): void {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'You do not have permission to do that.', 'lean-smtp' ) );
+		}
+		check_admin_referer( 'lean_smtp_gmail_oauth_disconnect' );
+
+		Lean_SMTP_Gmail_OAuth::revoke();
+		self::redirect_oauth_result( 'disconnected', '' );
+	}
+
+	/**
+	 * Redirect back to the settings page carrying an OAuth outcome, then stop.
+	 */
+	private static function redirect_oauth_result( string $status, string $message ): void {
+		$args = [ 'lsmtp_oauth' => $status ];
+		if ( '' !== $message ) {
+			$args['lsmtp_msg'] = rawurlencode( $message );
+		}
 		wp_safe_redirect( self::url( self::PAGE, $args ) );
 		exit;
 	}
@@ -494,12 +603,13 @@ class Lean_SMTP_Settings {
 	 */
 	private static function mailer_labels(): array {
 		return [
-			Lean_SMTP_Mailer::MAILER_SMTP    => __( 'SMTP', 'lean-smtp' ),
-			Lean_SMTP_Mailer::MAILER_SES     => __( 'Amazon SES', 'lean-smtp' ),
-			Lean_SMTP_Mailer::MAILER_MAILGUN => __( 'Mailgun', 'lean-smtp' ),
-			Lean_SMTP_Mailer::MAILER_RESEND  => __( 'Resend', 'lean-smtp' ),
-			Lean_SMTP_Mailer::MAILER_GMAIL   => __( 'Gmail / Google Workspace', 'lean-smtp' ),
-			Lean_SMTP_Mailer::MAILER_OFFLINE => __( 'Offline', 'lean-smtp' ),
+			Lean_SMTP_Mailer::MAILER_SMTP        => __( 'SMTP', 'lean-smtp' ),
+			Lean_SMTP_Mailer::MAILER_SES         => __( 'Amazon SES', 'lean-smtp' ),
+			Lean_SMTP_Mailer::MAILER_MAILGUN     => __( 'Mailgun', 'lean-smtp' ),
+			Lean_SMTP_Mailer::MAILER_RESEND      => __( 'Resend', 'lean-smtp' ),
+			Lean_SMTP_Mailer::MAILER_GMAIL       => __( 'Gmail / Google Workspace', 'lean-smtp' ),
+			Lean_SMTP_Mailer::MAILER_GMAIL_OAUTH => __( 'Gmail / Google Workspace (OAuth)', 'lean-smtp' ),
+			Lean_SMTP_Mailer::MAILER_OFFLINE     => __( 'Offline', 'lean-smtp' ),
 		];
 	}
 
@@ -581,12 +691,13 @@ class Lean_SMTP_Settings {
 		$option = Lean_SMTP_Mailer::OPTION_MAILER;
 		$locked = Lean_SMTP_Config::is_constant( $option );
 		$tags   = [
-			Lean_SMTP_Mailer::MAILER_SMTP    => __( 'Universal', 'lean-smtp' ),
-			Lean_SMTP_Mailer::MAILER_SES     => __( 'API', 'lean-smtp' ),
-			Lean_SMTP_Mailer::MAILER_MAILGUN => __( 'API', 'lean-smtp' ),
-			Lean_SMTP_Mailer::MAILER_RESEND  => __( 'API', 'lean-smtp' ),
-			Lean_SMTP_Mailer::MAILER_GMAIL   => __( 'API', 'lean-smtp' ),
-			Lean_SMTP_Mailer::MAILER_OFFLINE => __( 'Staging', 'lean-smtp' ),
+			Lean_SMTP_Mailer::MAILER_SMTP        => __( 'Universal', 'lean-smtp' ),
+			Lean_SMTP_Mailer::MAILER_SES         => __( 'API', 'lean-smtp' ),
+			Lean_SMTP_Mailer::MAILER_MAILGUN     => __( 'API', 'lean-smtp' ),
+			Lean_SMTP_Mailer::MAILER_RESEND      => __( 'API', 'lean-smtp' ),
+			Lean_SMTP_Mailer::MAILER_GMAIL       => __( 'API', 'lean-smtp' ),
+			Lean_SMTP_Mailer::MAILER_GMAIL_OAUTH => __( 'API', 'lean-smtp' ),
+			Lean_SMTP_Mailer::MAILER_OFFLINE     => __( 'Staging', 'lean-smtp' ),
 		];
 		?>
 		<div class="lsmtp-transports">
@@ -611,6 +722,7 @@ class Lean_SMTP_Settings {
 
 			<?php settings_errors(); ?>
 			<?php self::test_notice(); ?>
+			<?php self::oauth_notice(); ?>
 
 			<form method="post" action="options.php">
 				<?php settings_fields( self::GROUP ); ?>
@@ -819,7 +931,7 @@ class Lean_SMTP_Settings {
 				<div class="lsmtp-card lsmtp-section" data-mailer="gmail">
 					<h2><?php esc_html_e( 'Gmail / Google Workspace', 'lean-smtp' ); ?></h2>
 					<p class="description">
-						<?php esc_html_e( 'For Google Workspace domains only — not consumer @gmail.com accounts. Create a service account in Google Cloud, enable the Gmail API, and have a Workspace Super Admin authorise its client ID for the gmail.send scope under domain-wide delegation in the Admin Console.', 'lean-smtp' ); ?>
+						<?php esc_html_e( 'For Google Workspace domains only — not consumer @gmail.com accounts. Create a service account in Google Cloud, enable the Gmail API, and have a Workspace Super Admin authorize its client ID for the gmail.send scope under domain-wide delegation in the Admin Console.', 'lean-smtp' ); ?>
 					</p>
 					<table class="form-table" role="presentation">
 						<tr>
@@ -840,6 +952,42 @@ class Lean_SMTP_Settings {
 						<tr>
 							<th scope="row"><label for="<?php echo esc_attr( Lean_SMTP_Gmail::OPTION_SERVICE_ACCOUNT ); ?>"><?php esc_html_e( 'Service Account Key', 'lean-smtp' ); ?></label></th>
 							<td><?php self::secret_textarea_field( Lean_SMTP_Gmail::OPTION_SERVICE_ACCOUNT, __( 'Paste the entire service-account key JSON file from Google Cloud. Stored encrypted; leave blank to keep the current key.', 'lean-smtp' ) ); ?></td>
+						</tr>
+					</table>
+				</div>
+
+				<div class="lsmtp-card lsmtp-section" data-mailer="gmail_oauth">
+					<h2><?php esc_html_e( 'Gmail / Google Workspace (OAuth)', 'lean-smtp' ); ?></h2>
+					<p class="description">
+						<?php esc_html_e( 'For Google Workspace domains only — not consumer @gmail.com accounts. Unlike the service-account option above, this authorizes a single mailbox in the browser rather than needing a Super Admin to grant domain-wide delegation. In Google Cloud: set the OAuth consent screen\'s user type to Internal, enable the Gmail API, and create an OAuth client ID of type "Web application". Add the redirect URI below to that client, enter its ID and secret, save, then Connect.', 'lean-smtp' ); ?>
+					</p>
+					<table class="form-table" role="presentation">
+						<tr>
+							<th scope="row"><?php esc_html_e( 'Redirect URI', 'lean-smtp' ); ?></th>
+							<td>
+								<input type="text" class="large-text code" readonly="readonly"
+									value="<?php echo esc_attr( Lean_SMTP_Gmail_OAuth::redirect_uri() ); ?>" />
+								<p class="description"><?php esc_html_e( 'Add this exact URL to the OAuth client\'s "Authorized redirect URIs" in the Google Cloud Console — it must match character for character.', 'lean-smtp' ); ?></p>
+							</td>
+						</tr>
+						<tr>
+							<th scope="row"><label for="<?php echo esc_attr( Lean_SMTP_Gmail_OAuth::OPTION_CLIENT_ID ); ?>"><?php esc_html_e( 'Client ID', 'lean-smtp' ); ?></label></th>
+							<td>
+								<?php
+								self::text_field(
+									Lean_SMTP_Gmail_OAuth::OPTION_CLIENT_ID,
+									[ 'placeholder' => '1234567890-abc.apps.googleusercontent.com' ]
+								);
+								?>
+							</td>
+						</tr>
+						<tr>
+							<th scope="row"><label for="<?php echo esc_attr( Lean_SMTP_Gmail_OAuth::OPTION_CLIENT_SECRET ); ?>"><?php esc_html_e( 'Client Secret', 'lean-smtp' ); ?></label></th>
+							<td><?php self::secret_field( Lean_SMTP_Gmail_OAuth::OPTION_CLIENT_SECRET, __( 'Stored encrypted. Leave blank to keep the current secret.', 'lean-smtp' ) ); ?></td>
+						</tr>
+						<tr>
+							<th scope="row"><?php esc_html_e( 'Connection', 'lean-smtp' ); ?></th>
+							<td><?php self::gmail_oauth_connection(); ?></td>
 						</tr>
 					</table>
 				</div>
@@ -998,6 +1146,79 @@ class Lean_SMTP_Settings {
 				. '</p></div>';
 		}
 		// phpcs:enable WordPress.Security.NonceVerification.Recommended
+	}
+
+	/**
+	 * Notice for the outcome of a Gmail OAuth connect / disconnect round-trip.
+	 */
+	private static function oauth_notice(): void {
+		// phpcs:disable WordPress.Security.NonceVerification.Recommended
+		if ( ! isset( $_GET['lsmtp_oauth'] ) ) {
+			return;
+		}
+		$result = sanitize_key( wp_unslash( (string) $_GET['lsmtp_oauth'] ) );
+		if ( 'ok' === $result ) {
+			echo '<div class="notice notice-success is-dismissible"><p>'
+				. esc_html__( 'Google account connected.', 'lean-smtp' )
+				. '</p></div>';
+		} elseif ( 'disconnected' === $result ) {
+			echo '<div class="notice notice-success is-dismissible"><p>'
+				. esc_html__( 'Google account disconnected.', 'lean-smtp' )
+				. '</p></div>';
+		} else {
+			$msg = isset( $_GET['lsmtp_msg'] ) ? sanitize_text_field( wp_unslash( (string) $_GET['lsmtp_msg'] ) ) : '';
+			echo '<div class="notice notice-error is-dismissible"><p>'
+				. esc_html__( 'Could not connect the Google account.', 'lean-smtp' )
+				. ( '' !== $msg ? ' ' . esc_html( $msg ) : '' )
+				. '</p></div>';
+		}
+		// phpcs:enable WordPress.Security.NonceVerification.Recommended
+	}
+
+	/**
+	 * The Connection cell of the Gmail OAuth section: either "Connected as …"
+	 * with a Disconnect button, or a Connect button once the client id/secret are
+	 * saved. Rendered as nonce-protected links rather than a form, because this
+	 * section sits inside the settings page's options.php form and HTML forbids
+	 * nesting one form in another.
+	 */
+	private static function gmail_oauth_connection(): void {
+		if ( Lean_SMTP_Gmail_OAuth::is_connected() ) {
+			$disconnect = wp_nonce_url(
+				admin_url( 'admin-post.php?action=lean_smtp_gmail_oauth_disconnect' ),
+				'lean_smtp_gmail_oauth_disconnect'
+			);
+			?>
+			<p class="lsmtp-oauth-status">
+				<span class="lsmtp-dot"></span>
+				<?php
+				printf(
+					/* translators: %s: the connected Google mailbox address. */
+					esc_html__( 'Connected as %s', 'lean-smtp' ),
+					'<strong>' . esc_html( Lean_SMTP_Gmail_OAuth::sender() ) . '</strong>'
+				);
+				?>
+			</p>
+			<a class="button" href="<?php echo esc_url( $disconnect ); ?>"><?php esc_html_e( 'Disconnect', 'lean-smtp' ); ?></a>
+			<?php
+			return;
+		}
+
+		if ( '' === Lean_SMTP_Gmail_OAuth::client_id() || '' === Lean_SMTP_Gmail_OAuth::client_secret() ) {
+			?>
+			<p class="description"><?php esc_html_e( 'Enter the client ID and secret above and save, then a Connect button appears here.', 'lean-smtp' ); ?></p>
+			<?php
+			return;
+		}
+
+		$connect = wp_nonce_url(
+			admin_url( 'admin-post.php?action=lean_smtp_gmail_oauth_connect' ),
+			'lean_smtp_gmail_oauth_connect'
+		);
+		?>
+		<a class="button button-primary" href="<?php echo esc_url( $connect ); ?>"><?php esc_html_e( 'Connect a Google account', 'lean-smtp' ); ?></a>
+		<p class="description"><?php esc_html_e( 'Opens Google to authorize the mailbox mail will be sent from.', 'lean-smtp' ); ?></p>
+		<?php
 	}
 
 	private static function render_test_form(): void {

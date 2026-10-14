@@ -164,6 +164,18 @@ class Lean_SMTP_CLI {
 					self::secret_row( __( 'Gmail Service Account Key', 'lean-smtp' ), Lean_SMTP_Gmail::OPTION_SERVICE_ACCOUNT ),
 				];
 
+			case Lean_SMTP_Mailer::MAILER_GMAIL_OAUTH:
+				return [
+					self::row( __( 'Gmail OAuth Client ID', 'lean-smtp' ), Lean_SMTP_Gmail_OAuth::client_id(), Lean_SMTP_Gmail_OAuth::OPTION_CLIENT_ID ),
+					self::secret_row( __( 'Gmail OAuth Client Secret', 'lean-smtp' ), Lean_SMTP_Gmail_OAuth::OPTION_CLIENT_SECRET ),
+					self::row( __( 'Gmail OAuth Send As', 'lean-smtp' ), Lean_SMTP_Gmail_OAuth::sender(), Lean_SMTP_Gmail_OAuth::OPTION_SENDER ),
+					[
+						'setting' => __( 'Gmail OAuth Connected', 'lean-smtp' ),
+						'value'   => Lean_SMTP_Gmail_OAuth::is_connected() ? 'yes' : 'no',
+						'source'  => '',
+					],
+				];
+
 			case Lean_SMTP_Mailer::MAILER_OFFLINE:
 				// Nothing to configure — mail is recorded, never sent.
 				return [];

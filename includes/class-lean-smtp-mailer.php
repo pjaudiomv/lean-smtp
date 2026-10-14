@@ -44,12 +44,13 @@ class Lean_SMTP_Mailer {
 	const OPTION_SMTP_USERNAME   = 'lean_smtp_smtp_username';
 	const OPTION_SMTP_PASSWORD   = 'lean_smtp_smtp_password';
 
-	const MAILER_SMTP    = 'smtp';
-	const MAILER_SES     = 'ses';
-	const MAILER_MAILGUN = 'mailgun';
-	const MAILER_RESEND  = 'resend';
-	const MAILER_GMAIL   = 'gmail';
-	const MAILER_OFFLINE = 'offline';
+	const MAILER_SMTP        = 'smtp';
+	const MAILER_SES         = 'ses';
+	const MAILER_MAILGUN     = 'mailgun';
+	const MAILER_RESEND      = 'resend';
+	const MAILER_GMAIL       = 'gmail';
+	const MAILER_GMAIL_OAUTH = 'gmail_oauth';
+	const MAILER_OFFLINE     = 'offline';
 
 	/**
 	 * The API transports, keyed by their mailer slug. SMTP is deliberately
@@ -60,10 +61,11 @@ class Lean_SMTP_Mailer {
 	 */
 	public static function transports(): array {
 		return [
-			self::MAILER_SES     => 'Lean_SMTP_SES',
-			self::MAILER_MAILGUN => 'Lean_SMTP_Mailgun',
-			self::MAILER_RESEND  => 'Lean_SMTP_Resend',
-			self::MAILER_GMAIL   => 'Lean_SMTP_Gmail',
+			self::MAILER_SES         => 'Lean_SMTP_SES',
+			self::MAILER_MAILGUN     => 'Lean_SMTP_Mailgun',
+			self::MAILER_RESEND      => 'Lean_SMTP_Resend',
+			self::MAILER_GMAIL       => 'Lean_SMTP_Gmail',
+			self::MAILER_GMAIL_OAUTH => 'Lean_SMTP_Gmail_OAuth',
 		];
 	}
 
