@@ -39,5 +39,5 @@
   <text x="62" y="160" font-family="Helvetica, Arial, sans-serif" font-size="21" font-weight="400" fill="#C7D2FE">Minimal SMTP &amp; API mail routing for WordPress</text>
 
   <!-- Provider line -->
-  <text x="62" y="200" font-family="Helvetica, Arial, sans-serif" font-size="19" font-weight="700" fill="#E0E7FF">SMTP<tspan dx="12" fill="#FBBF24" font-weight="700">·</tspan><tspan dx="12">Amazon SES</tspan><tspan dx="12" fill="#FBBF24" font-weight="700">·</tspan><tspan dx="12">Mailgun</tspan><tspan dx="12" fill="#FBBF24" font-weight="700">·</tspan><tspan dx="12">Resend</tspan></text>
+  <text x="62" y="200" font-family="Helvetica, Arial, sans-serif" font-size="19" font-weight="700" fill="#E0E7FF">SMTP<tspan dx="12" fill="#FBBF24" font-weight="700">·</tspan><tspan dx="12">Amazon SES</tspan><tspan dx="12" fill="#FBBF24" font-weight="700">·</tspan><tspan dx="12">Mailgun</tspan><tspan dx="12" fill="#FBBF24" font-weight="700">·</tspan><tspan dx="12">Resend</tspan><tspan dx="12" fill="#FBBF24" font-weight="700">·</tspan><tspan dx="12">Gmail</tspan></text>
 </svg>
