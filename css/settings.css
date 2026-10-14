@@ -44,3 +44,5 @@
 .lsmtp-test-form { margin-top: 8px; }
 .lsmtp-test-note { margin-top: 8px; }
 .lsmtp-clear-form { margin-top: 12px; }
+.lsmtp-clear-secret { display: inline-block; margin: 6px 0 0; font-size: 12px; color: #646970; }
+.lsmtp-test-rich { display: inline-block; margin-top: 4px; font-size: 13px; color: #50575e; }

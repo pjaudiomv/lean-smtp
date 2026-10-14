@@ -20,6 +20,7 @@ class Test_Lean_SMTP_Logger extends WP_UnitTestCase {
 		delete_option( Lean_SMTP_Logger::OPTION_LOG_HEADERS );
 		delete_option( Lean_SMTP_Logger::OPTION_LOG_BODY );
 		delete_option( Lean_SMTP_Logger::OPTION_RETENTION );
+		delete_option( Lean_SMTP_Logger::OPTION_MAX_AGE );
 		update_option( Lean_SMTP_Logger::OPTION_ENABLED, '1' );
 		Lean_SMTP_Logger::create_table();
 		Lean_SMTP_Logger::clear();
@@ -30,9 +31,21 @@ class Test_Lean_SMTP_Logger extends WP_UnitTestCase {
 		delete_option( Lean_SMTP_Logger::OPTION_LOG_HEADERS );
 		delete_option( Lean_SMTP_Logger::OPTION_LOG_BODY );
 		delete_option( Lean_SMTP_Logger::OPTION_RETENTION );
+		delete_option( Lean_SMTP_Logger::OPTION_MAX_AGE );
 		Lean_SMTP_Logger::create_table();
 		Lean_SMTP_Logger::clear();
 		parent::tear_down();
+	}
+
+	/**
+	 * Push an existing row's sent_at back by $days, to stand in for an entry that
+	 * has aged past the cap. In the same local frame the logger writes sent_at in.
+	 */
+	private function backdate( string $to_email, int $days ): void {
+		global $wpdb;
+		$when = current_datetime()->modify( '-' . $days . ' days' )->format( 'Y-m-d H:i:s' );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- test helper on the custom log table.
+		$wpdb->update( Lean_SMTP_Logger::table(), [ 'sent_at' => $when ], [ 'to_email' => $to_email ] );
 	}
 
 	/**
@@ -323,5 +336,43 @@ class Test_Lean_SMTP_Logger extends WP_UnitTestCase {
 		$this->assertSame( Lean_SMTP_Logger::MAX_ROWS, Lean_SMTP_Logger::count() );
 		// The newest survive; the oldest are the ones dropped.
 		$this->assertSame( 'rcpt' . ( $overshoot - 1 ) . '@example.com', Lean_SMTP_Logger::recent( 1 )[0]->to_email );
+	}
+
+	// -------------------------------------------------------------------------
+	// Age cap
+	// -------------------------------------------------------------------------
+
+	public function test_max_age_defaults_off_and_rejects_a_value_outside_the_offered_set() {
+		$this->assertSame( 0, Lean_SMTP_Logger::max_age() );
+
+		update_option( Lean_SMTP_Logger::OPTION_MAX_AGE, '30' );
+		$this->assertSame( 30, Lean_SMTP_Logger::max_age() );
+
+		// A day count that isn't one of the offered choices reads as off.
+		update_option( Lean_SMTP_Logger::OPTION_MAX_AGE, '45' );
+		$this->assertSame( 0, Lean_SMTP_Logger::max_age() );
+	}
+
+	public function test_purge_expired_drops_rows_past_the_age_cap_and_keeps_recent_ones() {
+		Lean_SMTP_Logger::log( 'smtp', 'old@example.com', 'Old', Lean_SMTP_Logger::STATUS_SENT );
+		Lean_SMTP_Logger::log( 'smtp', 'fresh@example.com', 'Fresh', Lean_SMTP_Logger::STATUS_SENT );
+		$this->backdate( 'old@example.com', 40 );
+
+		update_option( Lean_SMTP_Logger::OPTION_MAX_AGE, '30' );
+		Lean_SMTP_Logger::purge_expired();
+
+		$remaining = wp_list_pluck( Lean_SMTP_Logger::recent( 5 ), 'to_email' );
+		$this->assertContains( 'fresh@example.com', $remaining );
+		$this->assertNotContains( 'old@example.com', $remaining );
+	}
+
+	public function test_purge_expired_does_nothing_when_the_cap_is_off() {
+		Lean_SMTP_Logger::log( 'smtp', 'old@example.com', 'Old', Lean_SMTP_Logger::STATUS_SENT );
+		$this->backdate( 'old@example.com', 400 );
+
+		update_option( Lean_SMTP_Logger::OPTION_MAX_AGE, '0' );
+		Lean_SMTP_Logger::purge_expired();
+
+		$this->assertSame( 1, Lean_SMTP_Logger::count() );
 	}
 }

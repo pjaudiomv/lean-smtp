@@ -1,0 +1,11 @@
+# Keep the build context lean and, above all, keep a local `vendor/` out of it:
+# the test image installs dependencies from composer.lock in its own layer, and
+# a `COPY . .` that carried a host vendor/ would clobber that known-good set with
+# whatever happens to be on the developer's disk.
+vendor/
+build/
+dist/
+node_modules/
+logs/
+.git/
+*.zip

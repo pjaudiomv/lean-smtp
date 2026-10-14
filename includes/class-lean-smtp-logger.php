@@ -22,9 +22,10 @@ class Lean_SMTP_Logger {
 	const OPTION_LOG_HEADERS = 'lean_smtp_log_headers';
 	const OPTION_LOG_BODY    = 'lean_smtp_log_body';
 	const OPTION_RETENTION   = 'lean_smtp_log_retention';
+	const OPTION_MAX_AGE     = 'lean_smtp_log_max_age';
 
 	/** Bumped whenever the table definition changes; see maybe_upgrade(). */
-	const DB_VERSION        = '2';
+	const DB_VERSION        = '3';
 	const OPTION_DB_VERSION = 'lean_smtp_db_version';
 
 	/** Rows kept when no retention has been chosen. */
@@ -36,6 +37,14 @@ class Lean_SMTP_Logger {
 	 * thing trim() exists to prevent.
 	 */
 	const RETENTION_CHOICES = [ 100, 500, 1000, 5000 ];
+
+	/**
+	 * Optional age cap, in days, offered alongside the row-count cap. 0 is off —
+	 * the default — so nothing expires by age unless a site opts in. It exists so
+	 * old message content (reset links, personal data) can't linger indefinitely
+	 * on a low-volume site where 100 rows might span years.
+	 */
+	const MAX_AGE_CHOICES = [ 0, 7, 30, 90, 365 ];
 
 	/** A stored body is truncated past this, so one runaway email can't bloat the table. */
 	const MAX_BODY_BYTES = 65535;
@@ -75,6 +84,17 @@ class Lean_SMTP_Logger {
 	}
 
 	/**
+	 * The age cap in days, or 0 when disabled. Anything outside the offered set
+	 * (an unset option, or a wp-config.php constant with a typo) reads as off
+	 * rather than being honoured.
+	 */
+	public static function max_age(): int {
+		$days = (int) Lean_SMTP_Config::get( self::OPTION_MAX_AGE, 0 );
+
+		return in_array( $days, self::MAX_AGE_CHOICES, true ) ? $days : 0;
+	}
+
+	/**
 	 * Create or update the log table. Called on activation and from
 	 * maybe_upgrade(); dbDelta adds any missing column, so it is safe to call
 	 * repeatedly.
@@ -95,6 +115,7 @@ class Lean_SMTP_Logger {
 			to_email text NOT NULL,
 			subject text NOT NULL,
 			status varchar(10) NOT NULL DEFAULT '',
+			message_id varchar(255) NOT NULL DEFAULT '',
 			error text NULL,
 			headers mediumtext NULL,
 			body mediumtext NULL,
@@ -135,6 +156,8 @@ class Lean_SMTP_Logger {
 	 * @param string          $error     Error detail on failure.
 	 * @param array           $mail_data The wp_mail() arguments (message, headers,
 	 *                                   attachments), for the optional content columns.
+	 *                                   A `lean_smtp_message_id` key, when present,
+	 *                                   is the provider's message id (API sends).
 	 */
 	public static function log( string $mailer, $to, string $subject, string $status, string $error = '', array $mail_data = [] ): void {
 		if ( ! self::enabled() ) {
@@ -146,12 +169,13 @@ class Lean_SMTP_Logger {
 		$to_email = is_array( $to ) ? implode( ', ', $to ) : (string) $to;
 
 		$row = [
-			'sent_at'  => current_time( 'mysql' ),
-			'mailer'   => $mailer,
-			'to_email' => $to_email,
-			'subject'  => $subject,
-			'status'   => $status,
-			'error'    => self::STATUS_FAILED === $status ? $error : null,
+			'sent_at'    => current_time( 'mysql' ),
+			'mailer'     => $mailer,
+			'to_email'   => $to_email,
+			'subject'    => $subject,
+			'status'     => $status,
+			'message_id' => (string) ( $mail_data['lean_smtp_message_id'] ?? '' ),
+			'error'      => self::STATUS_FAILED === $status ? $error : null,
 		];
 
 		$row += self::content_columns( $mail_data );
@@ -160,7 +184,7 @@ class Lean_SMTP_Logger {
 		$wpdb->insert(
 			self::table(),
 			$row,
-			[ '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s' ]
+			[ '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s' ]
 		);
 
 		self::trim();
@@ -233,7 +257,8 @@ class Lean_SMTP_Logger {
 	}
 
 	/**
-	 * Keep the table bounded — drop everything older than the newest retained rows.
+	 * Keep the table bounded — drop everything older than the newest retained
+	 * rows, then apply the optional age cap. Runs on every insert.
 	 */
 	private static function trim(): void {
 		global $wpdb;
@@ -245,6 +270,32 @@ class Lean_SMTP_Logger {
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- $table is $wpdb->prefix plus a fixed suffix, never user input.
 			$wpdb->query( $wpdb->prepare( "DELETE FROM {$table} WHERE id <= %d", (int) $cutoff ) );
 		}
+
+		self::purge_expired();
+	}
+
+	/**
+	 * Drop rows older than the age cap. A no-op when the cap is off. Runs on each
+	 * insert (via trim()) and when the Email Log screen loads, so expiry doesn't
+	 * depend on a background job — there is none — while a site still sends or
+	 * someone still looks at the log.
+	 */
+	public static function purge_expired(): void {
+		$days = self::max_age();
+		if ( $days <= 0 ) {
+			return;
+		}
+
+		global $wpdb;
+		$table = self::table();
+
+		// sent_at is stored with current_time('mysql') (site-local), so build the
+		// cutoff in the same frame to avoid a UTC/local mismatch. sent_at has its
+		// own KEY, so this is an indexed range delete.
+		$cutoff = current_datetime()->modify( '-' . $days . ' days' )->format( 'Y-m-d H:i:s' );
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- $table is $wpdb->prefix plus a fixed suffix, never user input.
+		$wpdb->query( $wpdb->prepare( "DELETE FROM {$table} WHERE sent_at < %s", $cutoff ) );
 	}
 
 	/**
