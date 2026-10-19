@@ -3,7 +3,7 @@
  * Plugin Name: Lean SMTP
  * Plugin URI: https://github.com/pjaudiomv/lean-smtp
  * Description: Free, no upsells, no telemetry. Routes wp_mail() through an SMTP server or the Amazon SES, Mailgun, Resend, or Gmail / Google Workspace API, with From identity and Reply-To control, wp-config.php overrides, failure alerts, WP-CLI commands, a test-email button, an offline mode for staging, and optional send logging.
- * Version: 0.6.0
+ * Version: 0.7.0
  * Requires at least: 6.0
  * Requires PHP: 8.1
  * Author: pjaudiomv
@@ -16,7 +16,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'LEAN_SMTP_VERSION', '0.6.0' );
+define( 'LEAN_SMTP_VERSION', '0.7.0' );
 define( 'LEAN_SMTP_FILE', __FILE__ );
 define( 'LEAN_SMTP_DIR', plugin_dir_path( __FILE__ ) );
 define( 'LEAN_SMTP_URL', plugin_dir_url( __FILE__ ) );
@@ -66,6 +66,13 @@ class Lean_SMTP {
 		// wp-admin — the check is one autoloaded option read.
 		add_action( 'plugins_loaded', [ 'Lean_SMTP_Logger', 'maybe_upgrade' ] );
 
+		// The log table is per-site, so a site created after a network activation
+		// needs its own. maybe_upgrade() above would also create it on that site's
+		// first request; this just does it up front when the site is created.
+		if ( is_multisite() ) {
+			add_action( 'wp_initialize_site', [ static::class, 'on_new_site' ], 900 );
+		}
+
 		if ( defined( 'WP_CLI' ) && WP_CLI ) {
 			Lean_SMTP_CLI::register();
 		}
@@ -75,8 +82,43 @@ class Lean_SMTP {
 	// Activation / Deactivation
 	// -------------------------------------------------------------------------
 
-	public static function activate(): void {
+	/**
+	 * The log table is per-site. On a network activation ($network_wide true)
+	 * create it on every existing site; otherwise create it for the one site
+	 * being activated, exactly as a single-site install does.
+	 *
+	 * @param bool $network_wide Whether the plugin is being network-activated.
+	 */
+	public static function activate( bool $network_wide = false ): void {
+		if ( is_multisite() && $network_wide ) {
+			foreach ( get_sites(
+				[
+					'fields' => 'ids',
+					'number' => 0,
+				]
+			) as $blog_id ) {
+				switch_to_blog( (int) $blog_id );
+				Lean_SMTP_Logger::create_table();
+				restore_current_blog();
+			}
+			return;
+		}
 		Lean_SMTP_Logger::create_table();
+	}
+
+	/**
+	 * Create the log table on a newly created site when the plugin is active for
+	 * the network, so the first send there has somewhere to log to.
+	 *
+	 * @param WP_Site $new_site The site just created.
+	 */
+	public static function on_new_site( $new_site ): void {
+		if ( ! Lean_SMTP_Config::is_network_mode() ) {
+			return;
+		}
+		switch_to_blog( (int) $new_site->blog_id );
+		Lean_SMTP_Logger::create_table();
+		restore_current_blog();
 	}
 
 	public static function deactivate(): void {
