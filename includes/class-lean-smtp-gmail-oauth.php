@@ -222,8 +222,11 @@ class Lean_SMTP_Gmail_OAuth implements Lean_SMTP_Api_Transport {
 		}
 
 		self::clear_token_cache();
-		update_option( self::OPTION_REFRESH_TOKEN, Lean_SMTP_Crypto::encrypt( (string) $body['refresh_token'] ) );
-		update_option( self::OPTION_SENDER, $email );
+		// The connection is configuration — on a network-activated multisite it is
+		// shared by every site — so it is written through Lean_SMTP_Config, which
+		// the reads already go through. The access-token cache below stays per-site.
+		Lean_SMTP_Config::store( self::OPTION_REFRESH_TOKEN, Lean_SMTP_Crypto::encrypt( (string) $body['refresh_token'] ) );
+		Lean_SMTP_Config::store( self::OPTION_SENDER, $email );
 
 		return true;
 	}
@@ -245,8 +248,8 @@ class Lean_SMTP_Gmail_OAuth implements Lean_SMTP_Api_Transport {
 		}
 
 		self::clear_token_cache();
-		delete_option( self::OPTION_REFRESH_TOKEN );
-		delete_option( self::OPTION_SENDER );
+		Lean_SMTP_Config::erase( self::OPTION_REFRESH_TOKEN );
+		Lean_SMTP_Config::erase( self::OPTION_SENDER );
 	}
 
 	// -------------------------------------------------------------------------
@@ -313,7 +316,7 @@ class Lean_SMTP_Gmail_OAuth implements Lean_SMTP_Api_Transport {
 		if ( $http < 200 || $http >= 300 || ! is_array( $body ) || empty( $body['access_token'] ) ) {
 			if ( is_array( $body ) && isset( $body['error'] ) && 'invalid_grant' === $body['error'] ) {
 				self::clear_token_cache();
-				delete_option( self::OPTION_REFRESH_TOKEN );
+				Lean_SMTP_Config::erase( self::OPTION_REFRESH_TOKEN );
 				return new WP_Error( 'lean_smtp_gmail_oauth_reconnect', __( 'The Google authorization is no longer valid — reconnect the account on the settings page.', 'lean-smtp' ) );
 			}
 			$message = is_array( $body ) && ! empty( $body['error_description'] )

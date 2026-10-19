@@ -28,15 +28,28 @@ class Lean_SMTP_Settings {
 	private static string $log_hook      = '';
 
 	public static function init(): void {
-		add_action( 'admin_menu', [ static::class, 'admin_menu' ] );
-		add_action( 'admin_init', [ static::class, 'register_settings' ] );
+		// On a network-activated multisite, mail is configured once at the Network
+		// Admin level and forced on every site: the Settings screen moves there and
+		// writes network options, and subsites get the Email Log only. Otherwise
+		// (single site, or multisite activated per-site) everything is per-site,
+		// exactly as before. Lean_SMTP_Config does the matching storage swap.
+		if ( Lean_SMTP_Config::is_network_mode() ) {
+			add_action( 'network_admin_menu', [ static::class, 'network_admin_menu' ] );
+			add_action( 'network_admin_edit_lean_smtp_network', [ static::class, 'handle_network_save' ] );
+			add_action( 'admin_menu', [ static::class, 'admin_menu_log_only' ] );
+			add_filter( 'network_admin_plugin_action_links_' . plugin_basename( LEAN_SMTP_FILE ), [ static::class, 'settings_link' ] );
+		} else {
+			add_action( 'admin_menu', [ static::class, 'admin_menu' ] );
+			add_action( 'admin_init', [ static::class, 'register_settings' ] );
+			add_filter( 'plugin_action_links_' . plugin_basename( LEAN_SMTP_FILE ), [ static::class, 'settings_link' ] );
+		}
+
 		add_action( 'admin_init', [ static::class, 'redirect_legacy_url' ] );
 		add_action( 'admin_enqueue_scripts', [ static::class, 'enqueue_assets' ] );
 		add_action( 'admin_post_lean_smtp_test', [ static::class, 'handle_test' ] );
 		add_action( 'admin_post_lean_smtp_gmail_oauth_connect', [ static::class, 'handle_gmail_oauth_connect' ] );
 		add_action( 'admin_post_' . Lean_SMTP_Gmail_OAuth::CALLBACK_ACTION, [ static::class, 'handle_gmail_oauth_callback' ] );
 		add_action( 'admin_post_lean_smtp_gmail_oauth_disconnect', [ static::class, 'handle_gmail_oauth_disconnect' ] );
-		add_filter( 'plugin_action_links_' . plugin_basename( LEAN_SMTP_FILE ), [ static::class, 'settings_link' ] );
 	}
 
 	/**
@@ -50,6 +63,21 @@ class Lean_SMTP_Settings {
 	 */
 	public static function url( string $page = self::PAGE, array $args = [] ): string {
 		$url = admin_url( 'admin.php?page=' . rawurlencode( $page ) );
+
+		return empty( $args ) ? $url : add_query_arg( $args, $url );
+	}
+
+	/**
+	 * The Settings screen's own URL. In network mode it lives in the Network Admin
+	 * rather than on a site, so everything that points at Settings — the action
+	 * links, the test / OAuth redirects — goes through here rather than url().
+	 *
+	 * @param array $args Extra query arguments.
+	 */
+	public static function settings_url( array $args = [] ): string {
+		$url = Lean_SMTP_Config::is_network_mode()
+			? network_admin_url( 'admin.php?page=' . rawurlencode( self::PAGE ) )
+			: admin_url( 'admin.php?page=' . rawurlencode( self::PAGE ) );
 
 		return empty( $args ) ? $url : add_query_arg( $args, $url );
 	}
@@ -83,11 +111,13 @@ class Lean_SMTP_Settings {
 			return '';
 		}
 
-		return self::url();
+		// In network mode the settings page is in the Network Admin, not on the
+		// site; settings_url() resolves to the right place in either mode.
+		return self::settings_url();
 	}
 
 	public static function settings_link( array $links ): array {
-		$links[] = '<a href="' . esc_url( self::url() ) . '">' . esc_html__( 'Settings', 'lean-smtp' ) . '</a>';
+		$links[] = '<a href="' . esc_url( self::settings_url() ) . '">' . esc_html__( 'Settings', 'lean-smtp' ) . '</a>';
 		return $links;
 	}
 
@@ -118,6 +148,64 @@ class Lean_SMTP_Settings {
 		);
 
 		self::$log_hook = Lean_SMTP_Log_Page::register( self::PAGE );
+	}
+
+	/**
+	 * The Settings screen in the Network Admin (network mode only). Mirrors
+	 * admin_menu()'s top-level entry, but gated on manage_network_options and
+	 * carrying only Settings — the Email Log stays per-site, registered by
+	 * admin_menu_log_only() on each subsite.
+	 */
+	public static function network_admin_menu(): void {
+		self::$settings_hook = (string) add_menu_page(
+			__( 'Lean SMTP', 'lean-smtp' ),
+			__( 'Lean SMTP', 'lean-smtp' ),
+			'manage_network_options',
+			self::PAGE,
+			[ static::class, 'settings_page' ],
+			'dashicons-email-alt'
+		);
+
+		// Re-label the submenu add_menu_page() creates for the parent itself.
+		add_submenu_page(
+			self::PAGE,
+			__( 'Lean SMTP Settings', 'lean-smtp' ),
+			__( 'Settings', 'lean-smtp' ),
+			'manage_network_options',
+			self::PAGE,
+			[ static::class, 'settings_page' ]
+		);
+	}
+
+	/**
+	 * A subsite's menu in network mode: the Email Log only, as a top-level entry.
+	 * Mail is configured at the network level, so there is no Settings screen
+	 * here; the log is per-site (each site's own sends) and is what someone comes
+	 * looking for when mail stops arriving.
+	 */
+	public static function admin_menu_log_only(): void {
+		$hook = (string) add_menu_page(
+			__( 'Lean SMTP', 'lean-smtp' ),
+			__( 'Lean SMTP', 'lean-smtp' ),
+			'manage_options',
+			Lean_SMTP_Log_Page::PAGE,
+			[ 'Lean_SMTP_Log_Page', 'render' ],
+			'dashicons-email-alt'
+		);
+
+		// Re-label the auto-created parent submenu so it doesn't read
+		// "Lean SMTP → Lean SMTP".
+		add_submenu_page(
+			Lean_SMTP_Log_Page::PAGE,
+			__( 'Email Log', 'lean-smtp' ),
+			__( 'Email Log', 'lean-smtp' ),
+			'manage_options',
+			Lean_SMTP_Log_Page::PAGE,
+			[ 'Lean_SMTP_Log_Page', 'render' ]
+		);
+
+		Lean_SMTP_Log_Page::attach_load( $hook );
+		self::$log_hook = $hook;
 	}
 
 	// -------------------------------------------------------------------------
@@ -205,9 +293,87 @@ class Lean_SMTP_Settings {
 	 */
 	public static function guard_constant( $value, string $option = '' ) {
 		if ( '' !== $option && Lean_SMTP_Config::is_constant( $option ) ) {
-			return get_option( $option, '' );
+			return Lean_SMTP_Config::stored( $option, '' );
 		}
 		return $value;
+	}
+
+	/**
+	 * Every network-stored setting mapped to the sanitize callback its submitted
+	 * value passes through — the Network Admin counterpart of register_settings().
+	 *
+	 * Spelled out rather than derived from register_settings(): that runs on
+	 * admin_init, which network mode doesn't hook, and WordPress.org review wants
+	 * a literal sanitize_callback there anyway. The two lists are deliberately the
+	 * same shape so a new setting is added to both. The OAuth refresh token and
+	 * connected sender are absent on purpose — they are written by the consent
+	 * callback, never posted on this form.
+	 *
+	 * @return array<string, callable>
+	 */
+	private static function network_sanitizers(): array {
+		return [
+			Lean_SMTP_Mailer::OPTION_MAILER          => [ static::class, 'sanitize_mailer' ],
+			Lean_SMTP_Mailer::OPTION_FROM_EMAIL      => 'sanitize_email',
+			Lean_SMTP_Mailer::OPTION_FROM_NAME       => 'sanitize_text_field',
+			Lean_SMTP_Mailer::OPTION_FORCE_FROM_MAIL => 'absint',
+			Lean_SMTP_Mailer::OPTION_FORCE_FROM_NAME => 'absint',
+			Lean_SMTP_Mailer::OPTION_REPLY_TO        => 'sanitize_email',
+			Lean_SMTP_Mailer::OPTION_SMTP_HOST       => 'sanitize_text_field',
+			Lean_SMTP_Mailer::OPTION_SMTP_PORT       => 'absint',
+			Lean_SMTP_Mailer::OPTION_SMTP_ENCRYPTION => [ static::class, 'sanitize_encryption' ],
+			Lean_SMTP_Mailer::OPTION_SMTP_AUTH       => 'absint',
+			Lean_SMTP_Mailer::OPTION_SMTP_USERNAME   => 'sanitize_text_field',
+			Lean_SMTP_Mailer::OPTION_SMTP_PASSWORD   => [ static::class, 'sanitize_smtp_password' ],
+			Lean_SMTP_SES::OPTION_REGION             => 'sanitize_text_field',
+			Lean_SMTP_SES::OPTION_ACCESS_KEY         => 'sanitize_text_field',
+			Lean_SMTP_SES::OPTION_SECRET_KEY         => [ static::class, 'sanitize_ses_secret' ],
+			Lean_SMTP_Mailgun::OPTION_DOMAIN         => 'sanitize_text_field',
+			Lean_SMTP_Mailgun::OPTION_REGION         => [ static::class, 'sanitize_mailgun_region' ],
+			Lean_SMTP_Mailgun::OPTION_API_KEY        => [ static::class, 'sanitize_mailgun_key' ],
+			Lean_SMTP_Resend::OPTION_API_KEY         => [ static::class, 'sanitize_resend_key' ],
+			Lean_SMTP_Gmail::OPTION_SERVICE_ACCOUNT  => [ static::class, 'sanitize_gmail_key' ],
+			Lean_SMTP_Gmail::OPTION_SENDER           => 'sanitize_email',
+			Lean_SMTP_Gmail_OAuth::OPTION_CLIENT_ID  => 'sanitize_text_field',
+			Lean_SMTP_Gmail_OAuth::OPTION_CLIENT_SECRET => [ static::class, 'sanitize_gmail_oauth_secret' ],
+			Lean_SMTP_Logger::OPTION_ENABLED         => 'absint',
+			Lean_SMTP_Logger::OPTION_LOG_HEADERS     => 'absint',
+			Lean_SMTP_Logger::OPTION_LOG_BODY        => 'absint',
+			Lean_SMTP_Logger::OPTION_RETENTION       => [ static::class, 'sanitize_retention' ],
+			Lean_SMTP_Logger::OPTION_MAX_AGE         => [ static::class, 'sanitize_max_age' ],
+		];
+	}
+
+	/**
+	 * Save the Network Admin settings form. The single-site screen posts to
+	 * options.php; there is no network equivalent, so this is the handler the
+	 * form's edit.php?action=lean_smtp_network target lands on.
+	 *
+	 * Each value runs through the same sanitizer the single-site screen uses and
+	 * is written to the network store via Lean_SMTP_Config::store(). A setting
+	 * pinned by a wp-config.php constant is skipped, mirroring guard_constant():
+	 * the field renders disabled and the stored value is left untouched.
+	 */
+	public static function handle_network_save(): void {
+		if ( ! current_user_can( 'manage_network_options' ) ) {
+			wp_die( esc_html__( 'You do not have permission to do that.', 'lean-smtp' ) );
+		}
+		check_admin_referer( 'lean_smtp_network' );
+
+		foreach ( self::network_sanitizers() as $option => $callback ) {
+			if ( Lean_SMTP_Config::is_constant( $option ) ) {
+				continue;
+			}
+
+			// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized, WordPress.Security.ValidatedSanitizedInput.MissingUnslash -- unslashed here and sanitized by $callback, this option's own sanitizer; nonce verified above.
+			$raw   = isset( $_POST[ $option ] ) ? wp_unslash( $_POST[ $option ] ) : '';
+			$clean = call_user_func( $callback, $raw );
+
+			Lean_SMTP_Config::store( $option, $clean );
+		}
+
+		wp_safe_redirect( self::settings_url( [ 'updated' => '1' ] ) );
+		exit;
 	}
 
 	public static function sanitize_mailer( $value ): string {
@@ -288,7 +454,7 @@ class Lean_SMTP_Settings {
 		if ( '' === $value ) {
 			// An empty field with its "clear" box ticked removes the stored secret;
 			// an empty field on its own keeps whatever is saved.
-			return self::secret_cleared( $option ) ? '' : (string) get_option( $option, '' );
+			return self::secret_cleared( $option ) ? '' : (string) Lean_SMTP_Config::stored( $option, '' );
 		}
 		// WordPress runs the sanitize callback twice on the first save of a new
 		// option (update_option, then add_option). The second pass receives our
@@ -339,7 +505,7 @@ class Lean_SMTP_Settings {
 			]
 			: [ 'lsmtp_test' => 'ok' ];
 
-		wp_safe_redirect( self::url( self::PAGE, $args ) );
+		wp_safe_redirect( self::settings_url( $args ) );
 		exit;
 	}
 
@@ -360,8 +526,7 @@ class Lean_SMTP_Settings {
 
 		if ( '' === Lean_SMTP_Gmail_OAuth::client_id() || '' === Lean_SMTP_Gmail_OAuth::client_secret() ) {
 			wp_safe_redirect(
-				self::url(
-					self::PAGE,
+				self::settings_url(
 					[
 						'lsmtp_oauth' => 'fail',
 						'lsmtp_msg'   => rawurlencode( __( 'Enter and save the OAuth client ID and secret first.', 'lean-smtp' ) ),
@@ -434,7 +599,7 @@ class Lean_SMTP_Settings {
 		if ( '' !== $message ) {
 			$args['lsmtp_msg'] = rawurlencode( $message );
 		}
-		wp_safe_redirect( self::url( self::PAGE, $args ) );
+		wp_safe_redirect( self::settings_url( $args ) );
 		exit;
 	}
 
@@ -716,16 +881,24 @@ class Lean_SMTP_Settings {
 
 	public static function settings_page(): void {
 		$active_mailer = Lean_SMTP_Config::get_string( Lean_SMTP_Mailer::OPTION_MAILER, Lean_SMTP_Mailer::MAILER_SMTP );
+		$network       = Lean_SMTP_Config::is_network_mode();
 		?>
 		<div class="wrap lsmtp-wrap">
 			<?php self::render_header( $active_mailer ); ?>
 
 			<?php settings_errors(); ?>
+			<?php self::saved_notice(); ?>
 			<?php self::test_notice(); ?>
 			<?php self::oauth_notice(); ?>
 
-			<form method="post" action="options.php">
-				<?php settings_fields( self::GROUP ); ?>
+			<form method="post" action="<?php echo esc_url( $network ? network_admin_url( 'edit.php?action=lean_smtp_network' ) : admin_url( 'options.php' ) ); ?>">
+				<?php
+				if ( $network ) {
+					wp_nonce_field( 'lean_smtp_network' );
+				} else {
+					settings_fields( self::GROUP );
+				}
+				?>
 
 				<div class="lsmtp-card">
 					<h2><?php esc_html_e( 'Mailer', 'lean-smtp' ); ?></h2>
@@ -1122,6 +1295,21 @@ class Lean_SMTP_Settings {
 		}
 
 		return $choices;
+	}
+
+	/**
+	 * The "Settings saved." confirmation for the Network Admin screen, which has
+	 * no options.php round-trip to raise one via settings_errors(). Keyed on the
+	 * updated=1 flag handle_network_save() redirects with.
+	 */
+	private static function saved_notice(): void {
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only; only decides whether to print a success confirmation after our own redirect.
+		if ( ! Lean_SMTP_Config::is_network_mode() || ! isset( $_GET['updated'] ) ) {
+			return;
+		}
+		echo '<div class="notice notice-success is-dismissible"><p>'
+			. esc_html__( 'Settings saved.', 'lean-smtp' )
+			. '</p></div>';
 	}
 
 	private static function test_notice(): void {

@@ -46,23 +46,58 @@ $lean_smtp_options = [
 	'lean_smtp_last_failure',
 ];
 
-foreach ( $lean_smtp_options as $lean_smtp_option ) {
-	delete_option( $lean_smtp_option );
+/**
+ * Remove everything the plugin keeps in the current site's own tables: its
+ * options, the per-site Gmail token-cache transients, and the send-log table.
+ *
+ * Factored out so a multisite network can run it once per site. On multisite
+ * the settings themselves may instead live in network options (see below); the
+ * options deleted here are harmless no-ops in that case.
+ *
+ * @param string[] $options Option names to delete.
+ */
+function lean_smtp_uninstall_site( array $options ): void {
+	global $wpdb;
+
+	foreach ( $options as $option ) {
+		delete_option( $option );
+	}
+
+	// Both Gmail transports cache short-lived access tokens in transients keyed by
+	// a hash of the credentials, so they are removed by prefix rather than by name.
+	// The service-account and OAuth prefixes are distinct; one LIKE pattern matches
+	// both because 'lean_smtp_gmail_' prefixes each of them.
+	$transient_like = $wpdb->esc_like( '_transient_lean_smtp_gmail_' ) . '%';
+	$timeout_like   = $wpdb->esc_like( '_transient_timeout_lean_smtp_gmail_' ) . '%';
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+	$wpdb->query( $wpdb->prepare( "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s", $transient_like, $timeout_like ) );
+
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.DirectDatabaseQuery.SchemaChange
+	$wpdb->query( "DROP TABLE IF EXISTS {$wpdb->prefix}lean_smtp_log" );
 }
 
-// The Email Log screen's per-page preference is user meta, not an option.
+if ( is_multisite() ) {
+	// The log table and token transients are per-site, so clean every site; the
+	// configuration may be network options (network-activated install), so clear
+	// those too.
+	foreach ( get_sites(
+		[
+			'fields' => 'ids',
+			'number' => 0,
+		]
+	) as $lean_smtp_blog_id ) {
+		switch_to_blog( (int) $lean_smtp_blog_id );
+		lean_smtp_uninstall_site( $lean_smtp_options );
+		restore_current_blog();
+	}
+
+	foreach ( $lean_smtp_options as $lean_smtp_option ) {
+		delete_site_option( $lean_smtp_option );
+	}
+} else {
+	lean_smtp_uninstall_site( $lean_smtp_options );
+}
+
+// The Email Log screen's per-page preference is user meta (global, one row per
+// user regardless of site), so it is removed once.
 delete_metadata( 'user', 0, 'lean_smtp_log_per_page', '', true );
-
-global $wpdb;
-
-// Both Gmail transports cache short-lived access tokens in transients keyed by a
-// hash of the credentials, so they are removed by prefix rather than by name.
-// The service-account and OAuth prefixes are distinct; one LIKE pattern matches
-// both because 'lean_smtp_gmail_' prefixes each of them.
-$lean_smtp_transient_like = $wpdb->esc_like( '_transient_lean_smtp_gmail_' ) . '%';
-$lean_smtp_timeout_like   = $wpdb->esc_like( '_transient_timeout_lean_smtp_gmail_' ) . '%';
-// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-$wpdb->query( $wpdb->prepare( "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s", $lean_smtp_transient_like, $lean_smtp_timeout_like ) );
-
-// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.DirectDatabaseQuery.SchemaChange
-$wpdb->query( "DROP TABLE IF EXISTS {$wpdb->prefix}lean_smtp_log" );

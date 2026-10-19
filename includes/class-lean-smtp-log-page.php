@@ -63,13 +63,23 @@ class Lean_SMTP_Log_Page {
 			[ static::class, 'render' ]
 		);
 
+		self::attach_load( $hook );
+
+		return $hook;
+	}
+
+	/**
+	 * Remember this screen's hook suffix and wire the load- hook that sets up the
+	 * screen option and builds the table. Split out of register() so network mode,
+	 * which hangs the log off a top-level menu of its own rather than a submenu,
+	 * can reuse the same setup — see Lean_SMTP_Settings::admin_menu_log_only().
+	 */
+	public static function attach_load( string $hook ): void {
 		self::$hook_suffix = $hook;
 
 		if ( '' !== $hook ) {
 			add_action( "load-{$hook}", [ static::class, 'load' ] );
 		}
-
-		return $hook;
 	}
 
 	public static function url( array $args = [] ): string {
@@ -247,7 +257,11 @@ class Lean_SMTP_Log_Page {
 		<div class="notice notice-warning">
 			<p>
 				<?php esc_html_e( 'The send log is off, so nothing new is being recorded.', 'lean-smtp' ); ?>
-				<a href="<?php echo esc_url( Lean_SMTP_Settings::url() ); ?>"><?php esc_html_e( 'Turn it on in Settings', 'lean-smtp' ); ?></a>
+				<?php if ( Lean_SMTP_Config::is_network_mode() ) : ?>
+					<?php esc_html_e( 'Logging is managed at the network level.', 'lean-smtp' ); ?>
+				<?php else : ?>
+					<a href="<?php echo esc_url( Lean_SMTP_Settings::url() ); ?>"><?php esc_html_e( 'Turn it on in Settings', 'lean-smtp' ); ?></a>
+				<?php endif; ?>
 			</p>
 		</div>
 		<?php

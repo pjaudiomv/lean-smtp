@@ -58,6 +58,63 @@ class Test_Lean_SMTP_Config extends WP_UnitTestCase {
 		$this->assertTrue( Lean_SMTP_Config::get_bool( Lean_SMTP_Mailer::OPTION_SMTP_AUTH, true ) );
 	}
 
+	public function test_is_network_mode_is_false_without_a_network_activation() {
+		// On a single site, and on multisite where the plugin is not network
+		// active (the test harness loads it by require, not by activation), reads
+		// and writes stay per-site.
+		$this->assertFalse( Lean_SMTP_Config::is_network_mode() );
+	}
+
+	public function test_store_and_stored_round_trip_through_site_options() {
+		if ( is_multisite() ) {
+			$this->markTestSkipped( 'Single-site storage path; the network path is covered separately.' );
+		}
+
+		Lean_SMTP_Config::store( Lean_SMTP_SES::OPTION_REGION, 'ap-south-1' );
+
+		$this->assertSame( 'ap-south-1', get_option( Lean_SMTP_SES::OPTION_REGION ) );
+		$this->assertSame( 'ap-south-1', Lean_SMTP_Config::stored( Lean_SMTP_SES::OPTION_REGION ) );
+
+		Lean_SMTP_Config::erase( Lean_SMTP_SES::OPTION_REGION );
+		$this->assertFalse( get_option( Lean_SMTP_SES::OPTION_REGION, false ) );
+	}
+
+	public function test_network_mode_reads_and_writes_the_network_store() {
+		if ( ! is_multisite() ) {
+			$this->markTestSkipped( 'Requires the multisite test harness (WP_TESTS_MULTISITE=1).' );
+		}
+
+		// Stand in for a network activation: the resolver reads the same option
+		// is_plugin_active_for_network() does.
+		update_site_option( 'active_sitewide_plugins', [ plugin_basename( LEAN_SMTP_FILE ) => time() ] );
+		$this->assertTrue( Lean_SMTP_Config::is_network_mode() );
+
+		Lean_SMTP_Config::store( Lean_SMTP_Mailer::OPTION_FROM_NAME, 'Network Co' );
+
+		// Written to the network store, not this site's options table.
+		$this->assertSame( 'Network Co', get_site_option( Lean_SMTP_Mailer::OPTION_FROM_NAME ) );
+		$this->assertFalse( get_option( Lean_SMTP_Mailer::OPTION_FROM_NAME, false ) );
+
+		// And read back through the resolver that every setting read goes through.
+		$this->assertSame( 'Network Co', Lean_SMTP_Config::get_string( Lean_SMTP_Mailer::OPTION_FROM_NAME ) );
+
+		Lean_SMTP_Config::erase( Lean_SMTP_Mailer::OPTION_FROM_NAME );
+		$this->assertFalse( get_site_option( Lean_SMTP_Mailer::OPTION_FROM_NAME, false ) );
+	}
+
+	public function test_secret_round_trips_through_the_network_store() {
+		if ( ! is_multisite() ) {
+			$this->markTestSkipped( 'Requires the multisite test harness (WP_TESTS_MULTISITE=1).' );
+		}
+
+		update_site_option( 'active_sitewide_plugins', [ plugin_basename( LEAN_SMTP_FILE ) => time() ] );
+
+		Lean_SMTP_Config::store( Lean_SMTP_SES::OPTION_SECRET_KEY, Lean_SMTP_Crypto::encrypt( 'net-secret' ) );
+
+		$this->assertTrue( Lean_SMTP_Config::has_secret( Lean_SMTP_SES::OPTION_SECRET_KEY ) );
+		$this->assertSame( 'net-secret', Lean_SMTP_Config::get_secret( Lean_SMTP_SES::OPTION_SECRET_KEY ) );
+	}
+
 	public function test_plugin_infrastructure_constants_are_not_treated_as_settings() {
 		// LEAN_SMTP_VERSION is always defined, but there is no such setting —
 		// it must never shadow an option.

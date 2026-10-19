@@ -217,8 +217,9 @@ class Lean_SMTP_CLI {
 	}
 
 	private static function source( string $option ): string {
-		return Lean_SMTP_Config::is_constant( $option )
-			? Lean_SMTP_Config::constant_name( $option )
-			: 'database';
+		if ( Lean_SMTP_Config::is_constant( $option ) ) {
+			return Lean_SMTP_Config::constant_name( $option );
+		}
+		return Lean_SMTP_Config::is_network_mode() ? 'network option' : 'database';
 	}
 }

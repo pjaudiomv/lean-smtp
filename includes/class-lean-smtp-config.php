@@ -39,6 +39,30 @@ class Lean_SMTP_Config {
 	}
 
 	/**
+	 * Whether settings are read from and written to the network (sitemeta) store
+	 * rather than this site's options table.
+	 *
+	 * True only on multisite when the plugin is network-activated, which is the
+	 * one case the Super Admin configures mail once for the whole network and
+	 * every subsite sends through it. A single-site install, or a multisite
+	 * install activated per-site, reads and writes ordinary site options exactly
+	 * as before.
+	 *
+	 * Deliberately not is_plugin_active_for_network(): that lives in
+	 * wp-admin/includes/plugin.php, which the front end — where mail is also
+	 * sent — hasn't loaded. The active_sitewide_plugins network option is the
+	 * same source that function reads, is object-cached, and is available on
+	 * every request; the is_multisite() guard skips even that read off multisite.
+	 */
+	public static function is_network_mode(): bool {
+		if ( ! is_multisite() ) {
+			return false;
+		}
+		$plugins = (array) get_site_option( 'active_sitewide_plugins', [] );
+		return isset( $plugins[ plugin_basename( LEAN_SMTP_FILE ) ] );
+	}
+
+	/**
 	 * Whether this setting is pinned by a constant (and so locked in the UI).
 	 */
 	public static function is_constant( string $option ): bool {
@@ -56,7 +80,48 @@ class Lean_SMTP_Config {
 		if ( self::is_constant( $option ) ) {
 			return constant( self::constant_name( $option ) );
 		}
-		return get_option( $option, $default );
+		return self::stored( $option, $default );
+	}
+
+	/**
+	 * The raw stored value — no constant lookup, no decryption — from whichever
+	 * store is in force (network sitemeta or this site's options). The single
+	 * place the get_option vs get_site_option choice is made, so reads here and
+	 * the writes in store()/erase() can't address different stores.
+	 *
+	 * @param mixed $default Returned when the option does not exist.
+	 * @return mixed
+	 */
+	public static function stored( string $option, $default = '' ) {
+		return self::is_network_mode()
+			? get_site_option( $option, $default )
+			: get_option( $option, $default );
+	}
+
+	/**
+	 * Save a setting to the store in force. Used by the network settings handler
+	 * and by the Gmail OAuth connection, which both write settings outside the
+	 * single-site options.php path.
+	 *
+	 * @param mixed $value Value to store.
+	 */
+	public static function store( string $option, $value ): void {
+		if ( self::is_network_mode() ) {
+			update_site_option( $option, $value );
+			return;
+		}
+		update_option( $option, $value );
+	}
+
+	/**
+	 * Remove a setting from the store in force.
+	 */
+	public static function erase( string $option ): void {
+		if ( self::is_network_mode() ) {
+			delete_site_option( $option );
+			return;
+		}
+		delete_option( $option );
 	}
 
 	public static function get_string( string $option, string $default = '' ): string {
@@ -82,7 +147,7 @@ class Lean_SMTP_Config {
 		if ( self::is_constant( $option ) ) {
 			return trim( (string) constant( self::constant_name( $option ) ) );
 		}
-		return Lean_SMTP_Crypto::decrypt( (string) get_option( $option, '' ) );
+		return Lean_SMTP_Crypto::decrypt( (string) self::stored( $option, '' ) );
 	}
 
 	/**
@@ -93,6 +158,6 @@ class Lean_SMTP_Config {
 		if ( self::is_constant( $option ) ) {
 			return '' !== trim( (string) constant( self::constant_name( $option ) ) );
 		}
-		return '' !== (string) get_option( $option, '' );
+		return '' !== (string) self::stored( $option, '' );
 	}
 }

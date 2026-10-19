@@ -4,7 +4,7 @@ Tags: smtp, mail, email, ses, wp_mail
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 0.6.0
+Stable tag: 0.7.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -104,6 +104,9 @@ The SMTP transport connects only to the host you configure and bundles no third-
 6. Email Log: every send, filtered by result and searchable by recipient or subject, with per-row and bulk delete. When message content is recorded, an entry expands to show the headers, attachment names and body that were sent.
 
 == Changelog ==
+
+= 0.7.0 =
+* Multisite: when the plugin is network-activated, mail is configured once under Network Admin → Lean SMTP and forced on every site on the network. Subsites show only the Email Log (their own sends); they have no separate mail settings. A single-site install, or a multisite install activated per-site, is unchanged. wp-config.php constants still override, now network-wide.
 
 = 0.6.0 =
 * Added a second Gmail / Google Workspace transport that authenticates with OAuth2 instead of a service account. You authorize one mailbox in the browser rather than needing a Super Admin to set up domain-wide delegation. Create an OAuth client in Google Cloud with the consent screen set to Internal, paste its ID and secret, and click Connect. Workspace domains only — consumer @gmail.com is not supported.
